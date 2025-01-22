@@ -8,7 +8,7 @@ from collections import deque  # 대기열 및 이전 곡 관리를 위한 deque
 from discord.ui import View, Button, Modal, TextInput  # 슬래시 명령어 UI 구성을 위한 모듈
 # from secret import token  # 디스코드 봇 토큰
 
-# 타입클라우드에서 환경변수로 토큰을 지정해서 사용하기 위한 코드
+# 타입클라우드 환경변수로 토큰을 지정해서 사용하기 위한 코드
 import os
 token = os.getenv("DISCORD_BOT_TOKEN")
 
@@ -370,6 +370,106 @@ def clean_youtube_url(url):
         return f"https://www.youtube.com/watch?v={video_id}"
     else:
         raise ValueError("유효한 YouTube URL이 아닙니다.")
+    
+@bot.tree.command(name="재생", description="유튜브 URL 또는 검색어를 통해 음악을 재생합니다.")
+async def play(interaction: discord.Interaction, query: str):
+    """
+    사용자가 입력한 YouTube URL 또는 검색어를 통해 음악을 재생합니다.
+    """
+    await interaction.response.defer()
+
+    if not interaction.user.voice:
+        await interaction.followup.send("먼저 음성 채널에 입장해야 합니다.", ephemeral=True)
+        return
+
+    channel = interaction.user.voice.channel  
+    voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
+
+    if not voice_client:
+        voice_client = await channel.connect()
+
+# 음악 채널 ID를 저장하는 변수
+music_channel_id = None
+
+# /음악채널생성 - 음악 전용 텍스트 채널 생성
+@bot.tree.command(name="음악채널생성", description="봇 명령어를 처리할 전용 텍스트 채널을 생성합니다.")
+async def create_music_channel(interaction: discord.Interaction):
+    """
+    음악 전용 텍스트 채널을 생성합니다.
+    """
+    global music_channel_id
+
+    # 이미 음악 채널이 존재하는 경우
+    if music_channel_id:
+        existing_channel = interaction.guild.get_channel(music_channel_id)
+        if existing_channel:
+            await interaction.response.send_message(f"이미 음악 전용 채널이 존재합니다: {existing_channel.mention}")
+            return
+
+    # 새로운 음악 전용 텍스트 채널 생성
+    try:
+        music_channel = await interaction.guild.create_text_channel(name="음악-명령어")
+        music_channel_id = music_channel.id  # 새로 생성된 채널 ID 저장
+        await interaction.response.send_message(f"음악 전용 채널이 생성되었습니다: {music_channel.mention}")
+    except Exception as e:
+        await interaction.response.send_message(f"음악 채널 생성 중 오류가 발생했습니다: {e}")
+
+# 음악채널에서 on_message 이벤트에서 호출되어 메시지를 YouTube 검색어로 처리하고 음악을 재생합니다.
+async def play_as_message(ctx, query: str):
+    """
+    메시지를 YouTube 검색어로 처리하여 음악을 재생합니다.
+    """
+    if not ctx.author.voice:
+        await ctx.send("먼저 음성 채널에 입장해야 합니다.")
+        return
+
+    channel = ctx.author.voice.channel
+    voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+
+    if not voice_client:
+        voice_client = await channel.connect()
+
+    async with ctx.typing():
+        try:
+            player = await YTDLSource.from_query(query, loop=bot.loop, stream=True)
+            music_queue.append(player)
+
+            if not voice_client.is_playing():
+                global current_track
+                current_track = music_queue.popleft()
+                previous_tracks.append(current_track)
+                voice_client.play(current_track.source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next_song(voice_client), bot.loop))
+                await ctx.send(f'재생 중: {current_track.title}')
+            else:
+                await ctx.send(f"대기열에 추가되었습니다: {player.title}")
+        
+        except Exception as e:
+            await ctx.send(f"오류가 발생했습니다: {e}")
+
+# 음악 채널에서 발생하는 모든 메세지를 감지하여 명령어로 처리리
+@bot.event
+async def on_message(message: discord.Message):
+    """
+    음악 전용 채널에서 발생하는 모든 메시지를 감지하고 YouTube에서 검색 후 음악을 재생합니다.
+    """
+    global music_channel_id
+
+    # 봇 자신의 메시지는 무시
+    if message.author.bot:
+        return
+
+    # 음악 전용 채널이 설정되지 않았거나, 메시지가 음악 채널에서 발생하지 않은 경우 무시
+    if not music_channel_id or message.channel.id != music_channel_id:
+        return
+
+    # 슬래시 명령어는 무시
+    if message.content.startswith("/"):
+        return
+
+    # 메시지를 YouTube 검색어로 처리하여 음악 재생
+    ctx = await bot.get_context(message)
+    if ctx.valid:
+        await play_as_message(ctx, message.content)
 
 # 토큰으로 봇 실행 시작
 bot.run(token)
