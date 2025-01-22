@@ -8,6 +8,9 @@ from collections import deque  # 대기열 및 이전 곡 관리를 위한 deque
 from discord.ui import View, Button, Modal, TextInput  # 슬래시 명령어 UI 구성을 위한 모듈
 from secret import token  # 디스코드 봇 토큰
 
+import os
+token = os.getenv("DISCORD_BOT_TOKEN")
+
 # 디스코드 봇 객체 생성
 intents = discord.Intents.default()
 intents.message_content = True  # 메시지 읽기 권한 활성화
