@@ -6,8 +6,9 @@ import re  # URL 검증 및 정리를 위한 정규식 모듈
 from urllib.parse import urlparse, parse_qs  # URL 파싱을 위한 모듈
 from collections import deque  # 대기열 및 이전 곡 관리를 위한 deque 사용
 from discord.ui import View, Button, Modal, TextInput  # 슬래시 명령어 UI 구성을 위한 모듈
-from secret import token  # 디스코드 봇 토큰
+# from secret import token  # 디스코드 봇 토큰
 
+# 타입클라우드에서 환경변수로 토큰을 지정해서 사용하기 위한 코드
 import os
 token = os.getenv("DISCORD_BOT_TOKEN")
 
