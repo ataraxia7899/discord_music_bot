@@ -6,11 +6,11 @@ import re  # URL 검증 및 정리를 위한 정규식 모듈
 from urllib.parse import urlparse, parse_qs  # URL 파싱을 위한 모듈
 from collections import deque  # 대기열 및 이전 곡 관리를 위한 deque 사용
 from discord.ui import View, Button, Modal, TextInput  # 슬래시 명령어 UI 구성을 위한 모듈
-# from secret import token  # 디스코드 봇 토큰
+from secret import token  # 디스코드 봇 토큰
 
-# 타입클라우드 환경변수로 토큰을 지정해서 사용하기 위한 코드
-import os
-token = os.getenv("DISCORD_BOT_TOKEN")
+# # 타입클라우드 환경변수로 토큰을 지정해서 사용하기 위한 코드
+# import os
+# token = os.getenv("DISCORD_BOT_TOKEN")
 
 # 디스코드 봇 객체 생성
 intents = discord.Intents.default()
@@ -351,10 +351,21 @@ class YTDLSource:
         except yt_dlp.utils.DownloadError as e:
             raise ValueError(f"동영상을 다운로드하는 중 오류가 발생했습니다: {e}")
 
-# 유튜브 URL 검증 함수 정의 (올바른 URL인지 확인)
+# 유튜브 URL 검증 함수 정의 (다양한 형식 지원)
 def is_valid_youtube_url(url):
-    youtube_regex = r"^(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=|embed/|v/|.+\?v=)?[a-zA-Z0-9_-]{11}$"
+    """
+    유튜브 URL이 유효한지 확인하는 함수.
+    다양한 유튜브 URL 형식을 지원합니다.
+    """
+    youtube_regex = (
+        r"^(https?:\/\/)?"  # http 또는 https 프로토콜 (선택적)
+        r"(www\.)?"  # www. (선택적)
+        r"(youtube\.com|youtu\.be)\/"  # youtube.com 또는 youtu.be
+        r"((watch\?v=|embed\/|shorts\/|v\/|playlist\?list=)?([a-zA-Z0-9_-]+))"  # 다양한 형식의 경로
+        r"(\?[a-zA-Z0-9_=&-]*)?$"  # 추가적인 쿼리 매개변수 (선택적)
+    )
     return re.match(youtube_regex, url) is not None
+
 
 # 유튜브 URL 정리 함수 정의 (추가 매개변수 제거)
 def clean_youtube_url(url):
@@ -370,23 +381,6 @@ def clean_youtube_url(url):
         return f"https://www.youtube.com/watch?v={video_id}"
     else:
         raise ValueError("유효한 YouTube URL이 아닙니다.")
-    
-@bot.tree.command(name="재생", description="유튜브 URL 또는 검색어를 통해 음악을 재생합니다.")
-async def play(interaction: discord.Interaction, query: str):
-    """
-    사용자가 입력한 YouTube URL 또는 검색어를 통해 음악을 재생합니다.
-    """
-    await interaction.response.defer()
-
-    if not interaction.user.voice:
-        await interaction.followup.send("먼저 음성 채널에 입장해야 합니다.", ephemeral=True)
-        return
-
-    channel = interaction.user.voice.channel  
-    voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
-
-    if not voice_client:
-        voice_client = await channel.connect()
 
 # 음악 채널 ID를 저장하는 변수
 music_channel_id = None
