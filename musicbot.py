@@ -8,7 +8,7 @@ from collections import deque  # 대기열 및 이전 곡 관리를 위한 deque
 from discord.ui import View, Button, Modal, TextInput  # 슬래시 명령어 UI 구성을 위한 모듈
 from secret import token  # 디스코드 봇 토큰
 
-# # 타입클라우드 환경변수로 토큰을 지정해서 사용하기 위한 코드
+# 타입클라우드에서 환경변수로 토큰을 지정해서 사용하기 위한 코드
 # import os
 # token = os.getenv("DISCORD_BOT_TOKEN")
 
@@ -19,7 +19,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # 대기열 및 현재 재생 중인 곡 관리
 music_queue = deque()  # 대기열 저장소
-previous_tracks = deque(maxlen=10)  # 최대 10곡까지 저장된 이전 곡 저장소
 current_track = None  # 현재 재생 중인 곡 정보
 auto_play_enabled = False  # 자동재생 기능 상태
 
@@ -50,7 +49,12 @@ async def play(interaction: discord.Interaction, query: str):
     await interaction.response.defer()
 
     if not interaction.user.voice:
-        await interaction.followup.send("먼저 음성 채널에 입장해야 합니다.", ephemeral=True)
+        embed = discord.Embed(
+            title="오류",
+            description="먼저 음성 채널에 입장해야 합니다.",
+            color=discord.Color.red()
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
         return
 
     channel = interaction.user.voice.channel  
@@ -67,14 +71,29 @@ async def play(interaction: discord.Interaction, query: str):
             if not voice_client.is_playing():
                 global current_track
                 current_track = music_queue.popleft()
-                previous_tracks.append(current_track)  
+
                 voice_client.play(current_track.source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next_song(voice_client), bot.loop))
-                await interaction.followup.send(f'재생 중: {current_track.title}')
+                embed = discord.Embed(
+                    title="재생 중",
+                    description=f"[{current_track.title}]({current_track.data.get('webpage_url', 'https://www.youtube.com')})",
+                    color=discord.Color.green()
+                )
+                await interaction.followup.send(embed=embed)
             else:
-                await interaction.followup.send(f"대기열에 추가되었습니다: {player.title}")
+                embed = discord.Embed(
+                    title="대기열에 추가됨",
+                    description=f"[{player.title}]({player.data.get('webpage_url', 'https://www.youtube.com')})",
+                    color=discord.Color.blue()
+                )
+                await interaction.followup.send(embed=embed)
         
         except Exception as e:
-            await interaction.followup.send(f"오류가 발생했습니다: {e}")
+            embed = discord.Embed(
+                title="오류 발생",
+                description=f"오류가 발생했습니다: {e}",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=embed)
 
 # 다음 곡 재생 함수 정의
 async def play_next_song(voice_client):
@@ -86,7 +105,6 @@ async def play_next_song(voice_client):
     if music_queue:
         next_track = music_queue.popleft()
         current_track = next_track
-        previous_tracks.append(next_track)
         
         voice_client.play(
             next_track.source,
@@ -97,7 +115,6 @@ async def play_next_song(voice_client):
         try:
             recommended_track = await YTDLSource.from_query("추천 노래", loop=bot.loop, stream=True)
             current_track = recommended_track
-            previous_tracks.append(recommended_track)
             
             voice_client.play(
                 recommended_track.source,
@@ -113,23 +130,64 @@ async def play_next_song(voice_client):
 @bot.tree.command(name="다음곡", description="대기열의 다음 곡을 재생합니다.")
 async def skip_to_next(interaction: discord.Interaction):
     """
-    대기열의 다음 곡을 재생합니다.
+    대기열의 다음 곡을 재생하거나, 자동재생이 켜져 있다면 추천 노래를 재생합니다.
     """
     await interaction.response.defer()
 
     voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
 
     if not voice_client or not voice_client.is_playing():
-        await interaction.followup.send("현재 재생 중인 음악이 없습니다.")
+        embed = discord.Embed(
+            title="오류",
+            description="현재 재생 중인 음악이 없습니다.",
+            color=discord.Color.red()
+        )
+        await interaction.followup.send(embed=embed)
         return
 
     if not music_queue:
-        await interaction.followup.send("현재 곡이 마지막 곡입니다.")
+        if auto_play_enabled:
+            try:
+                recommended_track = await YTDLSource.from_query("추천 노래", loop=bot.loop, stream=True)
+                global current_track
+                current_track = recommended_track
+
+                voice_client.stop()
+                voice_client.play(
+                    recommended_track.source,
+                    after=lambda e: asyncio.run_coroutine_threadsafe(play_next_song(voice_client), bot.loop)
+                )
+                embed = discord.Embed(
+                    title="추천 노래 재생 중",
+                    description=f"[{recommended_track.title}]({recommended_track.data.get('webpage_url', 'https://www.youtube.com')})",
+                    color=discord.Color.green()
+                )
+                await interaction.followup.send(embed=embed)
+            except Exception as e:
+                embed = discord.Embed(
+                    title="오류 발생",
+                    description=f"추천 노래를 재생하는 중 오류가 발생했습니다: {e}",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed)
+        else:
+            embed = discord.Embed(
+                title="알림",
+                description="현재 곡이 마지막 곡입니다.",
+                color=discord.Color.orange()
+            )
+            await interaction.followup.send(embed=embed)
         return
 
     voice_client.stop()
-    await interaction.followup.send("다음 곡으로 넘어갑니다.")
+    embed = discord.Embed(
+        title="다음 곡으로 넘어갑니다",
+        description="다음 곡을 재생합니다.",
+        color=discord.Color.blue()
+    )
+    await interaction.followup.send(embed=embed)
 
+# /시간조절 - 현재 곡의 시간 확인 채팅
 class TimeInputModal(Modal):
     """
     시간 입력을 위한 Modal 클래스
@@ -176,6 +234,7 @@ class TimeInputModal(Modal):
         except Exception as e:
             await interaction.response.send_message(f"시간 조절 중 오류가 발생했습니다: {e}")
 
+# /시간조절 - 현재 곡의 시간 조절 input창
 class TimeControlView(View):
     """
     시간 조절 버튼을 포함하는 View 클래스
@@ -206,13 +265,23 @@ async def seek(interaction: discord.Interaction):
     voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
 
     if not voice_client or not voice_client.is_playing():
-        await interaction.response.send_message("현재 재생 중인 음악이 없습니다.")
+        embed = discord.Embed(
+            title="오류",
+            description="현재 재생 중인 음악이 없습니다.",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed)
         return
 
     global current_track
 
     if not current_track:
-        await interaction.response.send_message("현재 재생 중인 곡 정보를 가져올 수 없습니다.")
+        embed = discord.Embed(
+            title="오류",
+            description="현재 재생 중인 곡 정보를 가져올 수 없습니다.",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed)
         return
 
     try:
@@ -232,10 +301,20 @@ async def seek(interaction: discord.Interaction):
 
         # View 생성 및 메시지 전송
         view = TimeControlView(voice_client, current_track)
-        await interaction.response.send_message(message, view=view)
+        embed = discord.Embed(
+            title="시간 조절",
+            description=message,
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed, view=view)
     
     except Exception as e:
-        await interaction.response.send_message(f"시간 조절 명령어 처리 중 오류가 발생했습니다: {e}")
+        embed = discord.Embed(
+            title="오류 발생",
+            description=f"시간 조절 명령어 처리 중 오류가 발생했습니다: {e}",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed)
 
 # /일시정지 - 일시정지/재개 토글 명령어로 통합
 @bot.tree.command(name="일시정지", description="현재 음악을 일시정지하거나 다시 재생합니다.")
@@ -249,12 +328,27 @@ async def pause_resume(interaction: discord.Interaction):
 
     if voice_client and voice_client.is_playing():
         voice_client.pause()
-        await interaction.followup.send("음악이 일시정지되었습니다.")
+        embed = discord.Embed(
+            title="일시정지",
+            description="음악이 일시정지되었습니다.",
+            color=discord.Color.orange()
+        )
+        await interaction.followup.send(embed=embed)
     elif voice_client and voice_client.is_paused():
         voice_client.resume()
-        await interaction.followup.send("음악이 다시 재생됩니다.")
+        embed = discord.Embed(
+            title="재생",
+            description="음악이 다시 재생됩니다.",
+            color=discord.Color.green()
+        )
+        await interaction.followup.send(embed=embed)
     else:
-        await interaction.followup.send("현재 재생 중인 음악이 없습니다.")
+        embed = discord.Embed(
+            title="오류",
+            description="현재 재생 중인 음악이 없습니다.",
+            color=discord.Color.red()
+        )
+        await interaction.followup.send(embed=embed)
 
 # /자동재생 - 자동재생 기능 켜기/끄기
 @bot.tree.command(name="자동재생", description="자동재생 기능을 켜거나 끕니다.")
@@ -265,7 +359,12 @@ async def toggle_auto_play(interaction: discord.Interaction):
     global auto_play_enabled
     auto_play_enabled = not auto_play_enabled
     status = "켜짐" if auto_play_enabled else "꺼짐"
-    await interaction.response.send_message(f"자동재생 기능이 {status} 상태입니다.")
+    embed = discord.Embed(
+        title="자동재생",
+        description=f"자동재생 기능이 {status} 상태입니다.",
+        color=discord.Color.blue()
+    )
+    await interaction.response.send_message(embed=embed)
 
 # /대기열 - 현재 대기열 목록을 확인합니다.
 @bot.tree.command(name="대기열", description="현재 대기열 목록을 확인합니다.")
@@ -274,12 +373,22 @@ async def show_queue(interaction: discord.Interaction):
     현재 대기열의 목록을 표시합니다.
     """
     if not music_queue:
-        await interaction.response.send_message("대기열에 곡이 없습니다.")
+        embed = discord.Embed(
+            title="대기열",
+            description="대기열에 곡이 없습니다.",
+            color=discord.Color.orange()
+        )
+        await interaction.response.send_message(embed=embed)
         return
 
     # 대기열 순번과 곡 제목 출력
     queue_list = "\n".join([f"{i + 1}. {track.title}" for i, track in enumerate(music_queue)])
-    await interaction.response.send_message(f"현재 대기열:\n{queue_list}")
+    embed = discord.Embed(
+        title="현재 대기열",
+        description=queue_list,
+        color=discord.Color.blue()
+    )
+    await interaction.response.send_message(embed=embed)
 
 # /정지 - 현재 음악 정지하기
 @bot.tree.command(name="정지", description="현재 재생 중인 음악을 멈춥니다.")
@@ -293,9 +402,19 @@ async def stop(interaction: discord.Interaction):
 
     if voice_client and voice_client.is_connected():
         voice_client.stop()
-        await interaction.followup.send("음악을 멈추고 봇이 퇴장했습니다.")
+        embed = discord.Embed(
+            title="정지",
+            description="음악을 멈추고 봇이 퇴장했습니다.",
+            color=discord.Color.red()
+        )
+        await interaction.followup.send(embed=embed)
     else:
-        await interaction.followup.send("봇이 음성 채널에 있지 않습니다.")
+        embed = discord.Embed(
+            title="오류",
+            description="봇이 음성 채널에 있지 않습니다.",
+            color=discord.Color.red()
+        )
+        await interaction.followup.send(embed=embed)
 
 # 유튜브 DL 옵션 설정 함수 정의
 def get_ytdl_options():
@@ -303,7 +422,7 @@ def get_ytdl_options():
         'format': 'bestaudio/best',  # 최고 음질 선택 (기본값)
         'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',  # 파일 이름 템플릿
         'restrictfilenames': True,  # 파일 이름 제한
-        'noplaylist': False,  # 플레이리스트 다운로드 비활성화
+        'noplaylist': True,  # 플레이리스트 다운로드 활성화
         'nocheckcertificate': True,  # SSL 인증서 검사 비활성화
         'ignoreerrors': False,  # 오류 무시 비활성화
         'logtostderr': False,  # 표준 오류로 로그 출력 비활성화
@@ -364,106 +483,102 @@ def is_valid_youtube_url(url):
         r"((watch\?v=|embed\/|shorts\/|v\/|playlist\?list=)?([a-zA-Z0-9_-]+))"  # 다양한 형식의 경로
         r"(\?[a-zA-Z0-9_=&-]*)?$"  # 추가적인 쿼리 매개변수 (선택적)
     )
-    return re.match(youtube_regex, url) is not None
-
 
 # 유튜브 URL 정리 함수 정의 (추가 매개변수 제거)
 def clean_youtube_url(url):
+    """
+    유튜브 URL에서 불필요한 매개변수를 제거하고 순수한 동영상 ID를 추출합니다.
+    """
     parsed_url = urlparse(url)
+
+    # youtu.be 형식 (공유 URL)
     if "youtu.be" in parsed_url.netloc:
-        video_id = parsed_url.path.lstrip("/")
+        video_id = parsed_url.path.lstrip("/")  # 동영상 ID 추출
+
+    # youtube.com 형식 (긴 URL)
     elif "youtube.com" in parsed_url.netloc:
-        video_id = parse_qs(parsed_url.query).get("v", [None])[0]
+        query_params = parse_qs(parsed_url.query)  # 쿼리 매개변수 파싱
+        video_id = query_params.get("v", [None])[0]  # "v" 매개변수에서 동영상 ID 추출
+
     else:
-        video_id = None
+        video_id = None  # 지원되지 않는 URL 형식
 
     if video_id:
-        return f"https://www.youtube.com/watch?v={video_id}"
+        return f"https://www.youtube.com/watch?v={video_id}"  # 정리된 URL 반환
     else:
         raise ValueError("유효한 YouTube URL이 아닙니다.")
 
-# 음악 채널 ID를 저장하는 변수
-music_channel_id = None
-
-# /음악채널생성 - 음악 전용 텍스트 채널 생성
-@bot.tree.command(name="음악채널생성", description="봇 명령어를 처리할 전용 텍스트 채널을 생성합니다.")
-async def create_music_channel(interaction: discord.Interaction):
-    """
-    음악 전용 텍스트 채널을 생성합니다.
-    """
-    global music_channel_id
-
-    # 이미 음악 채널이 존재하는 경우
-    if music_channel_id:
-        existing_channel = interaction.guild.get_channel(music_channel_id)
-        if existing_channel:
-            await interaction.response.send_message(f"이미 음악 전용 채널이 존재합니다: {existing_channel.mention}")
-            return
-
-    # 새로운 음악 전용 텍스트 채널 생성
-    try:
-        music_channel = await interaction.guild.create_text_channel(name="음악-명령어")
-        music_channel_id = music_channel.id  # 새로 생성된 채널 ID 저장
-        await interaction.response.send_message(f"음악 전용 채널이 생성되었습니다: {music_channel.mention}")
-    except Exception as e:
-        await interaction.response.send_message(f"음악 채널 생성 중 오류가 발생했습니다: {e}")
-
-# 음악채널에서 on_message 이벤트에서 호출되어 메시지를 YouTube 검색어로 처리하고 음악을 재생합니다.
-async def play_as_message(ctx, query: str):
-    """
-    메시지를 YouTube 검색어로 처리하여 음악을 재생합니다.
-    """
-    if not ctx.author.voice:
-        await ctx.send("먼저 음성 채널에 입장해야 합니다.")
-        return
-
-    channel = ctx.author.voice.channel
-    voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-
-    if not voice_client:
-        voice_client = await channel.connect()
-
-    async with ctx.typing():
-        try:
-            player = await YTDLSource.from_query(query, loop=bot.loop, stream=True)
-            music_queue.append(player)
-
-            if not voice_client.is_playing():
-                global current_track
-                current_track = music_queue.popleft()
-                previous_tracks.append(current_track)
-                voice_client.play(current_track.source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next_song(voice_client), bot.loop))
-                await ctx.send(f'재생 중: {current_track.title}')
-            else:
-                await ctx.send(f"대기열에 추가되었습니다: {player.title}")
-        
-        except Exception as e:
-            await ctx.send(f"오류가 발생했습니다: {e}")
-
-# 음악 채널에서 발생하는 모든 메세지를 감지하여 명령어로 처리리
+# 음성 채널의 상태를 모니터링하여, 유저가 모두 떠났을 때 봇이 자동으로 음성 채널에서 나가도록 함함
 @bot.event
-async def on_message(message: discord.Message):
+async def on_voice_state_update(member, before, after):
     """
-    음악 전용 채널에서 발생하는 모든 메시지를 감지하고 YouTube에서 검색 후 음악을 재생합니다.
+    음성 채널의 상태가 변경될 때 호출되는 이벤트.
     """
-    global music_channel_id
-
-    # 봇 자신의 메시지는 무시
-    if message.author.bot:
+    # 봇이 음성 채널에 연결되어 있는지 확인
+    voice_client = discord.utils.get(bot.voice_clients, guild=member.guild)
+    if not voice_client:
         return
 
-    # 음악 전용 채널이 설정되지 않았거나, 메시지가 음악 채널에서 발생하지 않은 경우 무시
-    if not music_channel_id or message.channel.id != music_channel_id:
+    # 봇이 연결된 음성 채널에 남아 있는 멤버 확인
+    if before.channel == voice_client.channel and after.channel != voice_client.channel:
+        # 해당 음성 채널에 남아 있는 멤버 수 확인
+        remaining_members = [
+            m for m in voice_client.channel.members if not m.bot
+        ]  # 봇을 제외한 멤버만 계산
+
+        if len(remaining_members) == 0:
+            # 멤버가 아무도 남아 있지 않으면 음성 채널 떠남
+            await voice_client.disconnect()
+            print("음성 채널에 유저가 없어 봇이 나갔습니다.")
+
+# /현재곡 - 현재 재생 중인 곡 정보 표시
+@bot.tree.command(name="현재곡", description="현재 재생 중인 곡의 정보를 표시합니다.")
+async def now_playing(interaction: discord.Interaction):
+    """
+    현재 재생 중인 곡의 정보를 Discord Embed 메시지로 표시합니다.
+    """
+    global current_track
+
+    if not current_track:
+        await interaction.response.send_message("현재 재생 중인 곡이 없습니다.", ephemeral=True)
         return
 
-    # 슬래시 명령어는 무시
-    if message.content.startswith("/"):
-        return
+    try:
+        # 현재 곡 정보 가져오기
+        title = current_track.title
+        url = current_track.data.get('webpage_url', 'https://www.youtube.com')
+        duration = current_track.data.get('duration', 0)  # 전체 길이 (초 단위)
+        minutes_total, seconds_total = divmod(duration, 60)
 
-    # 메시지를 YouTube 검색어로 처리하여 음악 재생
-    ctx = await bot.get_context(message)
-    if ctx.valid:
-        await play_as_message(ctx, message.content)
+        # 현재 재생 시간 (추정값)
+        # Discord Audio API는 현재 재생 시간을 제공하지 않으므로 추정값 사용 가능
+        current_time_seconds = 0  # 추정값으로 설정 (실제 구현은 FFmpeg에서 추적 필요)
+        minutes_current, seconds_current = divmod(current_time_seconds, 60)
+
+        # Embed 메시지 생성
+        embed = discord.Embed(
+            title="🎵 현재 재생 중인 곡",
+            description=f"[{title}]({url})",
+            color=discord.Color.blue()
+        )
+        embed.add_field(
+            name="⏱️ 재생 시간",
+            value=f"{minutes_current:02}:{seconds_current:02} / {minutes_total:02}:{seconds_total:02}",
+            inline=False
+        )
+        embed.add_field(
+            name="📂 대기열",
+            value=f"{len(music_queue)}곡 남음" if music_queue else "대기열이 비어 있습니다.",
+            inline=False
+        )
+        embed.set_thumbnail(url="https://img.youtube.com/vi/{}/hqdefault.jpg".format(current_track.data.get('id', '')))
+        embed.set_footer(text="음악 분위기를 즐겨보세요! 🎶")
+
+        # 메시지 전송
+        await interaction.response.send_message(embed=embed)
+
+    except Exception as e:
+        await interaction.response.send_message(f"현재 곡 정보를 가져오는 중 오류가 발생했습니다: {e}", ephemeral=True)
 
 # 토큰으로 봇 실행 시작
 bot.run(token)
