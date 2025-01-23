@@ -7,6 +7,8 @@ import re  # URL 검증 및 정리를 위한 정규식 모듈
 from urllib.parse import urlparse, parse_qs  # URL 파싱을 위한 모듈
 from collections import deque  # 대기열 및 이전 곡 관리를 위한 deque 사용
 from discord.ui import View, Button, Modal, TextInput  # 슬래시 명령어 UI 구성을 위한 모듈
+import subprocess
+import os
 import time  # 시간 추적을 위한 모듈 추가
 import random # 랜덤 추천 노래를 위한 모듈 추가
 # from secret import token  # 디스코드 봇 토큰 가져오기
@@ -14,6 +16,32 @@ import random # 랜덤 추천 노래를 위한 모듈 추가
 # 타입클라우드에서 환경변수로 토큰을 지정해서 사용하기 위한 코드
 import os
 token = os.getenv("DISCORD_BOT_TOKEN")
+
+import subprocess
+import os
+
+# Python 코드에서 FFmpeg 설치 코드 작성
+def install_ffmpeg():
+    try:
+        # FFmpeg 설치 확인
+        result = subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode == 0:
+            print("FFmpeg is already installed.")
+            return
+    except FileNotFoundError:
+        print("FFmpeg is not installed. Installing now...")
+
+    # FFmpeg 설치 명령어 실행
+    try:
+        subprocess.run(["sudo", "apt", "update"], check=True)
+        subprocess.run(["sudo", "apt", "install", "-y", "ffmpeg"], check=True)
+        print("FFmpeg installation completed.")
+    except Exception as e:
+        print(f"An error occurred while installing FFmpeg: {e}")
+
+# 실행 시 FFmpeg 설치 확인 및 설치
+install_ffmpeg()
+
 
 # 디스코드 봇 객체 생성
 intents = discord.Intents.default()
