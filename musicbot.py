@@ -17,33 +17,6 @@ import random # 랜덤 추천 노래를 위한 모듈 추가
 import os
 token = os.getenv("DISCORD_BOT_TOKEN")
 
-import subprocess
-import os
-
-import subprocess
-
-def install_ffmpeg():
-    try:
-        # FFmpeg 설치 여부 확인
-        result = subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if result.returncode == 0:
-            print("FFmpeg is already installed.")
-            return
-    except FileNotFoundError:
-        print("FFmpeg is not installed. Installing now...")
-
-    # FFmpeg 설치 명령어 실행
-    try:
-        subprocess.run(["apt", "update"], check=True)
-        subprocess.run(["apt", "install", "-y", "ffmpeg"], check=True)
-        print("FFmpeg installation completed.")
-    except Exception as e:
-        print(f"An error occurred while installing FFmpeg: {e}")
-
-# 실행
-install_ffmpeg()
-
-
 # 디스코드 봇 객체 생성
 intents = discord.Intents.default()
 intents.message_content = True  # 메시지 읽기 권한 활성화
