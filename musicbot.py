@@ -20,10 +20,11 @@ token = os.getenv("DISCORD_BOT_TOKEN")
 import subprocess
 import os
 
-# Python 코드에서 FFmpeg 설치 코드 작성
+import subprocess
+
 def install_ffmpeg():
     try:
-        # FFmpeg 설치 확인
+        # FFmpeg 설치 여부 확인
         result = subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if result.returncode == 0:
             print("FFmpeg is already installed.")
@@ -33,13 +34,13 @@ def install_ffmpeg():
 
     # FFmpeg 설치 명령어 실행
     try:
-        subprocess.run(["sudo", "apt", "update"], check=True)
-        subprocess.run(["sudo", "apt", "install", "-y", "ffmpeg"], check=True)
+        subprocess.run(["apt", "update"], check=True)
+        subprocess.run(["apt", "install", "-y", "ffmpeg"], check=True)
         print("FFmpeg installation completed.")
     except Exception as e:
         print(f"An error occurred while installing FFmpeg: {e}")
 
-# 실행 시 FFmpeg 설치 확인 및 설치
+# 실행
 install_ffmpeg()
 
 
