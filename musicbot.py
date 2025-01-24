@@ -126,7 +126,14 @@ async def play_next_song(voice_client):
     elif auto_play_enabled:
         # 자동재생 기능이 켜져 있을 때 추천 노래 재생
         try:
-            recommended_track = await YTDLSource.from_query("추천 노래", loop=bot.loop, stream=True)
+            if current_track:
+                # 현재 곡의 제목을 기반으로 비슷한 노래 검색
+                recommended_query = f"{current_track.title} 비슷한 노래"
+            else:
+                # 현재 곡이 없으면 기본 추천 노래 검색
+                recommended_query = "추천 노래"
+
+            recommended_track = await YTDLSource.from_query(recommended_query, loop=bot.loop, stream=True)
             current_track = recommended_track
 
             # 현재 곡 시작 시간 기록
