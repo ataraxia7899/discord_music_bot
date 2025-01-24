@@ -20,7 +20,7 @@ token = os.getenv("DISCORD_BOT_TOKEN")
 # 디스코드 봇 객체 생성
 intents = discord.Intents.default()
 intents.message_content = True  # 메시지 읽기 권한 활성화
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.AutoShardedBot(command_prefix="!", intents=intents)
 
 # 대기열 및 현재 재생 중인 곡 관리
 music_queue = deque()  # 대기열 저장소
@@ -449,14 +449,19 @@ def get_ytdl_options():
         'quiet': True,  # 출력 최소화
         'no_warnings': True,  # 경고 메시지 비활성화
         'default_search': 'ytsearch',  # 기본 검색 모드로 YouTube 검색 활성화
-        'source_address': '0.0.0.0'  # IPv6 문제 방지
+        'source_address': '0.0.0.0',  # IPv6 문제 방지
+        'skip_download': True,  # 다운로드 건너뛰기
+        'concurrent_fragments': 5  # 동시 다운로드 조각 수 설정
     }
 
 # FFmpeg 옵션 설정 (최적화)
 ffmpeg_options = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2',  # 재연결 지연 시간 단축
-    'options': '-vn'  # 비디오 스트림 비활성화 (오디오만 재생)
+    'options': '-vn -filter:a "volume=1.0"'  # 비디오 스트림 비활성화 및 볼륨 필터 추가
 }
+
+# 캐싱을 위한 간단한 메모리 캐시 구현
+cache = {}
 
 # 유튜브 동영상을 디스코드 봇에서 재생하기 위한 클래스 정의
 class YTDLSource:
@@ -474,23 +479,30 @@ class YTDLSource:
         loop = loop or asyncio.get_event_loop()
         ytdl = yt_dlp.YoutubeDL(get_ytdl_options())
 
-        try:
-            if is_valid_youtube_url(query):  
-                cleaned_url = clean_youtube_url(query) 
-                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(cleaned_url, download=not stream))
-            else:  
-                search_results = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch:{query}", download=False))  
-                if not search_results or 'entries' not in search_results or len(search_results['entries']) == 0:
-                    raise ValueError("검색 결과를 찾을 수 없습니다.")
-                first_result = search_results['entries'][0]  
-                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(first_result['webpage_url'], download=not stream))
+        # 캐시 확인
+        if query in cache:
+            data = cache[query]
+        else:
+            try:
+                if is_valid_youtube_url(query):  
+                    cleaned_url = clean_youtube_url(query) 
+                    data = await loop.run_in_executor(None, lambda: ytdl.extract_info(cleaned_url, download=not stream))
+                else:  
+                    search_results = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch:{query}", download=False))  
+                    if not search_results or 'entries' not in search_results or len(search_results['entries']) == 0:
+                        raise ValueError("검색 결과를 찾을 수 없습니다.")
+                    first_result = search_results['entries'][0]  
+                    data = await loop.run_in_executor(None, lambda: ytdl.extract_info(first_result['webpage_url'], download=not stream))
 
-            filename = data['url'] if stream else ytdl.prepare_filename(data)  
-            start_time = int(data.get('start_time', 0))  # 시작 시간 설정
-            return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data, start_time=start_time)  
+                # 캐시에 저장
+                cache[query] = data
 
-        except yt_dlp.utils.DownloadError as e:
-            raise ValueError(f"동영상을 다운로드하는 중 오류가 발생했습니다: {e}")
+            except yt_dlp.utils.DownloadError as e:
+                raise ValueError(f"동영상을 다운로드하는 중 오류가 발생했습니다: {e}")
+
+        filename = data['url'] if stream else ytdl.prepare_filename(data)  
+        start_time = int(data.get('start_time', 0))  # 시작 시간 설정
+        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data, start_time=start_time)  
 
 # 유튜브 URL 검증 함수 정의 (다양한 형식 지원)
 def is_valid_youtube_url(url):
