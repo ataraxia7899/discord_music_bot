@@ -10,15 +10,14 @@ from discord.ui import Modal, TextInput, View, Button
 # 상위 디렉토리를 path에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import ffmpeg_options
-from components.play_commands import YTDLSource, play_next_song
+from music_components.play_commands import YTDLSource, play_next_song
 
-# /다음곡 - 대기열의 다음 곡 재생하기
+# /다음곡 명령어 수정
 @commands.command(name="다음곡", description="대기열의 다음 곡을 재생합니다.")
 async def skip_to_next(ctx):
-    # 수정된 부분: voice_client 가져오기
     voice_client = ctx.guild.voice_client
 
-    if not voice_client:
+    if not voice_client or not voice_client.is_connected():
         embed = discord.Embed(
             title="오류",
             description="봇이 음성 채널에 연결되어 있지 않습니다.",
@@ -36,54 +35,122 @@ async def skip_to_next(ctx):
         await ctx.send(embed=embed)
         return
 
-    if voice_client.is_playing():
-        voice_client.stop()
-        voice_client.cleanup()
+    try:
+        # 현재 트랙 저장
+        current_track = ctx.bot.current_track
+        next_track = None
+        
+        if ctx.bot.music_queue:
+            next_track = ctx.bot.music_queue[0]
+            embed = discord.Embed(
+                title="다음 곡으로 넘어가는 중...",
+                description=f"[{next_track.title}]({next_track.data.get('webpage_url', 'https://www.youtube.com')})",
+                color=discord.Color.green()
+            )
+            await ctx.send(embed=embed)
 
-    await play_next_song(voice_client, ctx.bot)
+        # 현재 재생 중인 곡 정지
+        if voice_client.is_playing():
+            voice_client.stop()
 
-    embed = discord.Embed(
-        title="다음 곡 재생 중",
-        description=f"[{ctx.bot.current_track.title}]({ctx.bot.current_track.data.get('webpage_url', 'https://www.youtube.com')})",
-        color=discord.Color.green()
-    )
-    await ctx.send(embed=embed)
+        # 다음 곡 재생 시도
+        try:
+            if next_track:
+                # 새로운 오디오 소스 생성
+                audio = discord.FFmpegOpusAudio(
+                    next_track.url,
+                    bitrate=128,
+                    before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+                    options='-vn'
+                )
+                
+                # 다음 곡 설정 및 재생
+                ctx.bot.current_track = next_track
+                ctx.bot.music_queue.popleft()  # 대기열에서 제거
+                
+                voice_client.play(audio, after=lambda e: asyncio.run_coroutine_threadsafe(
+                    play_next_song(voice_client, ctx.bot), ctx.bot.loop))
+            else:
+                await ctx.send("재생할 다음 곡이 없습니다.")
+                if voice_client.is_connected():
+                    await voice_client.disconnect()
+                    
+        except Exception as e:
+            print(f"재생 시도 중 오류 발생: {e}")
+            ctx.bot.current_track = current_track  # 오류 시 이전 트랙 복원
+            await ctx.send("다음 곡 재생 중 오류가 발생했습니다.")
 
-# 슬래시 명령어 정의
+    except Exception as e:
+        print(f"다음 곡 재생 중 오류 발생: {e}")
+        await ctx.send("다음 곡 재생 중 오류가 발생했습니다.")
+
+# 슬래시 명령어도 동일한 방식으로 수정
 async def skip_to_next_slash(interaction: discord.Interaction):
-    # 수정된 부분: voice_client 가져오기
+    await interaction.response.defer()
+    
     voice_client = interaction.guild.voice_client
-
-    if not voice_client:
-        embed = discord.Embed(
-            title="오류",
-            description="봇이 음성 채널에 연결되어 있지 않습니다.",
-            color=discord.Color.red()
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+    if not voice_client or not voice_client.is_connected():
+        await interaction.followup.send("봇이 음성 채널에 연결되어 있지 않습니다.", ephemeral=True)
         return
 
-    if not interaction.client.music_queue and not interaction.client.auto_play_enabled:
-        embed = discord.Embed(
-            title="알림",
-            description="현재 곡이 마지막 곡입니다.",
-            color=discord.Color.orange()
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+    if not interaction.client.music_queue:
+        await interaction.followup.send("대기열이 비어있습니다.", ephemeral=True)
         return
 
-    if voice_client.is_playing():
-        voice_client.stop()
-        voice_client.cleanup()
+    try:
+        # 현재 트랙 정보 저장
+        current_track = interaction.client.current_track
+        next_track = interaction.client.music_queue[0]
 
-    await play_next_song(voice_client, interaction.client)
+        # 다음 곡 정보 메시지 전송
+        embed = discord.Embed(
+            title="다음 곡으로 넘어가는 중...",
+            description=f"[{next_track.title}]({next_track.data.get('webpage_url', 'https://www.youtube.com')})",
+            color=discord.Color.green()
+        )
+        await interaction.followup.send(embed=embed)
 
-    embed = discord.Embed(
-        title="다음 곡 재생 중",
-        description=f"[{interaction.client.current_track.title}]({interaction.client.current_track.data.get('webpage_url', 'https://www.youtube.com')})",
-        color=discord.Color.green()
-    )
-    await interaction.response.send_message(embed=embed)
+        # 현재 재생 중인 곡 정지 전에 새로운 오디오 소스 준비
+        try:
+            # 새로운 오디오 소스 생성
+            audio = discord.FFmpegOpusAudio(
+                next_track.url,
+                bitrate=128,
+                before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+                options='-vn'
+            )
+            
+            # 현재 재생 중인 곡 정지
+            if voice_client.is_playing():
+                voice_client.stop()
+                await asyncio.sleep(0.5)  # 약간의 지연 추가
+            
+            # 다음 곡 설정
+            interaction.client.current_track = next_track
+            interaction.client.music_queue.popleft()
+            
+            # 재생 시작
+            def after_playing(error):
+                if error:
+                    print(f"재생 오류 발생: {error}")
+                asyncio.run_coroutine_threadsafe(
+                    play_next_song(voice_client, interaction.client),
+                    interaction.client.loop
+                )
+
+            voice_client.play(audio, after=after_playing)
+                
+        except Exception as e:
+            print(f"재생 시도 중 오류 발생: {e}")
+            interaction.client.current_track = current_track
+            raise  # 상위 예외 처리로 전달
+
+    except Exception as e:
+        print(f"다음 곡 재생 중 오류 발생: {e}")
+        try:
+            await interaction.followup.send("다음 곡 재생 중 오류가 발생했습니다.", ephemeral=True)
+        except:
+            pass  # 이미 응답이 전송된 경우 무시
 
 # /셔플 - 대기열에 있는 노래들을 무작위로 섞습니다.
 @commands.command(name="셔플", description="대기열에 있는 노래들을 무작위로 섞습니다.")
@@ -336,80 +403,76 @@ async def toggle_repeat_slash(interaction: discord.Interaction):
 # /정지 - 현재 음악 정지하기 및 봇 퇴장하기
 @commands.command(name="정지", description="현재 재생 중인 음악을 멈추고 봇을 퇴장시킵니다.")
 async def stop(ctx):
-    voice_client = ctx.guild.voice_client
-
-    if voice_client:
-        try:
-            # 응답 즉시 전송
+    try:
+        voice_client = ctx.guild.voice_client
+        if voice_client and voice_client.channel:
+            channel = voice_client.channel
+            # 봇이 현재 속한 채널의 멤버 수 확인
+            if ctx.author.voice and ctx.author.voice.channel == channel:
+                embed = discord.Embed(
+                    title="정지",
+                    description="음악을 멈추고 봇이 퇴장합니다...",
+                    color=discord.Color.red()
+                )
+                await ctx.send(embed=embed)
+                
+                if voice_client.is_playing():
+                    voice_client.stop()
+                if hasattr(voice_client, 'cleanup'):
+                    voice_client.cleanup()
+                await voice_client.disconnect()
+            else:
+                embed = discord.Embed(
+                    title="오류",
+                    description="봇과 같은 음성 채널에 있어야 합니다.",
+                    color=discord.Color.red()
+                )
+                await ctx.send(embed=embed)
+        else:
             embed = discord.Embed(
-                title="정지",
-                description="음악을 멈추고 봇이 퇴장합니다...",
-                color=discord.Color.red()
+                title="알림",
+                description="봇이 음성 채널에 연결되어 있지 않습니다.",
+                color=discord.Color.blue()
             )
             await ctx.send(embed=embed)
-            
-            # 정리 작업 수행
-            if voice_client.is_playing():
-                voice_client.stop()
-            if hasattr(voice_client, 'cleanup'):
-                voice_client.cleanup()
-            await voice_client.disconnect()
-            
-        except Exception as e:
-            print(f"음성 연결 종료 중 오류 발생: {e}")
-            embed = discord.Embed(
-                title="오류",
-                description="음성 연결을 종료하는 중 오류가 발생했습니다.",
-                color=discord.Color.red()
-            )
-            await ctx.send(embed=embed)
-    else:
-        embed = discord.Embed(
-            title="알림",
-            description="봇이 음성 채널에 연결되어 있지 않습니다.",
-            color=discord.Color.blue()
-        )
-        await ctx.send(embed=embed)
+    except Exception as e:
+        print(f"정지 명령어 처리 중 오류 발생: {e}")
+        await ctx.send("정지 처리 중 오류가 발생했습니다.")
 
 # 슬래시 명령어 정의
 async def stop_slash(interaction: discord.Interaction):
-    # 응답 지연 처리 추가
-    await interaction.response.defer()
-    
-    voice_client = interaction.guild.voice_client
-
-    if voice_client:
-        try:
-            # 먼저 메시지 전송
-            embed = discord.Embed(
-                title="정지",
-                description="음악을 멈추고 봇이 퇴장합니다...",
-                color=discord.Color.red()
+    try:
+        voice_client = interaction.guild.voice_client
+        if voice_client and voice_client.channel:
+            channel = voice_client.channel
+            if interaction.user.voice and interaction.user.voice.channel == channel:
+                await interaction.response.defer()
+                
+                embed = discord.Embed(
+                    title="정지",
+                    description="음악을 멈추고 봇이 퇴장합니다...",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed)
+                
+                if voice_client.is_playing():
+                    voice_client.stop()
+                if hasattr(voice_client, 'cleanup'):
+                    voice_client.cleanup()
+                await voice_client.disconnect()
+            else:
+                await interaction.response.send_message(
+                    "봇과 같은 음성 채널에 있어야 합니다.",
+                    ephemeral=True
+                )
+        else:
+            await interaction.response.send_message(
+                "봇이 음성 채널에 연결되어 있지 않습니다.",
+                ephemeral=True
             )
-            await interaction.followup.send(embed=embed)
-            
-            # 정리 작업 수행
-            if voice_client.is_playing():
-                voice_client.stop()
-            if hasattr(voice_client, 'cleanup'):
-                voice_client.cleanup()
-            await voice_client.disconnect()
-            
-        except Exception as e:
-            print(f"음성 연결 종료 중 오류 발생: {e}")
-            embed = discord.Embed(
-                title="오류",
-                description="음성 연결을 종료하는 중 오류가 발생했습니다.",
-                color=discord.Color.red()
-            )
-            await interaction.followup.send(embed=embed)
-    else:
-        embed = discord.Embed(
-            title="알림",
-            description="봇이 음성 채널에 연결되어 있지 않습니다.",
-            color=discord.Color.blue()
-        )
-        await interaction.followup.send(embed=embed, ephemeral=True)
+    except Exception as e:
+        print(f"정지 명령어 처리 중 오류 발생: {e}")
+        await interaction.response.send_message("정지 처리 중 오류가 발생했습니다.", ephemeral=True)
 
 # setup 함수 정의
 async def setup(bot):

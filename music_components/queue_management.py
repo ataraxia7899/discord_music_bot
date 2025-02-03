@@ -1,10 +1,27 @@
 import discord
 from discord.ext import commands
 import time
+from music_components.play_commands import YTDLSource
+
+"""
+대기열 관리 관련 명령어들을 포함하는 모듈
+현재 재생 중인 곡 정보, 대기열 관리 등의 기능을 제공합니다.
+"""
 
 # /현재곡 - 현재 재생 중인 곡 정보 표시
 @commands.command(name="현재곡", description="현재 재생 중인 곡의 정보를 표시합니다.")
 async def now_playing(ctx):
+    """
+    현재 재생 중인 곡의 정보를 표시합니다.
+    
+    Args:
+        ctx: 명령어 컨텍스트
+        
+    표시 정보:
+        - 곡 제목과 URL
+        - 재생 시간 (현재/전체)
+        - 대기열 상태
+    """
     if not ctx.bot.current_track:
         await ctx.send("현재 재생 중인 곡이 없습니다.")
         return
