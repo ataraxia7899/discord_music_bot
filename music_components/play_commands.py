@@ -304,6 +304,16 @@ async def play_next_song(voice_client, bot, disconnect_on_empty=True):
         if voice_client and voice_client.is_connected():
             await voice_client.disconnect()
 
+# 서버별 음악 상태를 관리하는 클래스
+class ServerMusicState:
+    def __init__(self):
+        self.voice_client = None
+        self.text_channel = None
+        self.current_track = None
+        self.current_track_start_time = None
+        self.music_queue = []
+        self.repeat_mode = "off"  # off, current, queue
+
 # 새로운 클래스 추가
 class QueuedTrack:
     def __init__(self, title, url, id="", status="대기중", webpage_url=None):
@@ -692,3 +702,36 @@ async def setup(bot):
     @bot.tree.command(name="재생", description="유튜브 URL 또는 검색어를 통해 음악을 재생합니다.")
     async def play_slash_command(interaction: discord.Interaction, query: str):
         await play_slash(interaction, query)
+
+# 추가: 서버별 재생 상태를 관리하는 함수들
+async def get_guild_voice_state(ctx_or_interaction):
+    """서버별 음성 상태와 음악 상태를 가져옵니다."""
+    if isinstance(ctx_or_interaction, commands.Context):
+        guild_id = ctx_or_interaction.guild.id
+        guild = ctx_or_interaction.guild
+        bot = ctx_or_interaction.bot
+    else:  # Interaction
+        guild_id = ctx_or_interaction.guild_id
+        guild = ctx_or_interaction.guild
+        bot = ctx_or_interaction.client
+
+    # 서버 상태 가져오기
+    server_state = bot.get_server_state(guild_id)
+    
+    # voice_client가 없으면 현재 voice_client 저장
+    if not server_state.voice_client and guild.voice_client:
+        server_state.voice_client = guild.voice_client
+
+    return server_state
+
+async def update_guild_voice_state(ctx_or_interaction, voice_client):
+    """서버의 voice_client 상태를 업데이트합니다."""
+    if isinstance(ctx_or_interaction, commands.Context):
+        guild_id = ctx_or_interaction.guild.id
+        bot = ctx_or_interaction.bot
+    else:  # Interaction
+        guild_id = ctx_or_interaction.guild_id
+        bot = ctx_or_interaction.client
+
+    server_state = bot.get_server_state(guild_id)
+    server_state.voice_client = voice_client

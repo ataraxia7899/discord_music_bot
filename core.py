@@ -5,6 +5,16 @@
 
 from collections import deque
 
+class ServerMusicState:
+    def __init__(self):
+        self.music_queue = deque()
+        self.current_track = None
+        self.current_track_start_time = None
+        self.repeat_mode = "none"
+        self.voice_client = None
+        self.text_channel = None
+        self.auto_play_enabled = False
+
 class MusicBotCore:
     """
     음악 봇의 핵심 기능을 담당하는 클래스
@@ -24,6 +34,7 @@ class MusicBotCore:
         self.current_track_start_time = None
         self.repeat_mode = "none"  # none, current, queue
         self.auto_play_enabled = False  # 기본값을 False로 변경
+        self.server_states = {}  # 서버별 상태 관리 추가
 
     def clear_queue(self):
         """재생 대기열을 초기화합니다."""
@@ -36,5 +47,11 @@ class MusicBotCore:
     def get_next_track(self):
         """다음 트랙을 반환합니다."""
         return self.music_queue.popleft() if self.music_queue else None
+
+    def get_server_state(self, guild_id: int) -> ServerMusicState:
+        """서버별 상태를 반환하거나 새로 생성합니다."""
+        if guild_id not in self.server_states:
+            self.server_states[guild_id] = ServerMusicState()
+        return self.server_states[guild_id]
 
 music_bot = MusicBotCore()
