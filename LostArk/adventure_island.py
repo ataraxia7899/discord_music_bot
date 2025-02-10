@@ -252,4 +252,29 @@ class AdventureIsland(commands.Cog):
         await self.bot.wait_until_ready()
 
 async def setup(bot):
-    await bot.add_cog(AdventureIsland(bot))
+    """봇에 명령어를 등록합니다."""
+    # 기존 Cog 등록
+    adventure_island_cog = AdventureIsland(bot)
+    await bot.add_cog(adventure_island_cog)
+    
+    # 슬래시 명령어 등록
+    @bot.tree.command(
+        name="골드섬알림",
+        description="골드섬 알림을 켜거나 끕니다"
+    )
+    async def toggle_notification_slash(interaction: discord.Interaction):
+        await adventure_island_cog.toggle_notification(interaction)
+
+    @bot.tree.command(
+        name="골드섬알림상태",
+        description="현재 골드섬 알림 상태를 확인합니다"
+    )
+    async def check_notification_status_slash(interaction: discord.Interaction):
+        await adventure_island_cog.check_notification_status(interaction)
+
+    @bot.tree.command(
+        name="다음골드섬",
+        description="다음 골드섬 정보를 확인합니다"
+    )
+    async def next_gold_island_slash(interaction: discord.Interaction):
+        await adventure_island_cog.next_gold_island(interaction)
