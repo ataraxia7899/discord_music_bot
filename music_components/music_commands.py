@@ -80,8 +80,11 @@ async def skip_to_next(ctx):
             ctx.bot.current_track = current_track  # 오류 시 이전 트랙 복원
             await ctx.send("다음 곡 재생 중 오류가 발생했습니다.")
 
+    except IndexError:
+        await ctx.send("대기열이 비어있습니다.")
     except Exception as e:
         print(f"다음 곡 재생 중 오류 발생: {e}")
+
         await ctx.send("다음 곡 재생 중 오류가 발생했습니다.")
 
 # 슬래시 명령어도 동일한 방식으로 수정
