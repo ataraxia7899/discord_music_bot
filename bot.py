@@ -29,6 +29,15 @@ class MusicBot(commands.Bot):
         self.current_track_start_time = music_bot.current_track_start_time
         self.repeat_mode = music_bot.repeat_mode
         self.auto_play_enabled = music_bot.auto_play_enabled
+
+    # 서버 상태 접근 메서드 추가
+    def get_server_state(self, guild_id: int):
+        """서버별 음악 상태를 가져옵니다."""
+        return self.music_core.get_server_state(guild_id)
+
+    def clear_server_state(self, guild_id: int):
+        """서버의 음악 상태를 제거합니다."""
+        self.music_core.clear_server_state(guild_id)
         
     async def setup_hook(self):
         """

@@ -116,7 +116,19 @@ pip install -r requirements.txt
 
 ### 4️⃣ 봇 토큰 설정
 
-- `secret.py` 파일에 Discord 봇 토큰 추가: `token = "YOUR_DISCORD_BOT_TOKEN"`
+1. `secret.py` 파일에 Discord 봇 토큰
+2. 혹은 코드를 주석처리를 수정한 뒤 환경변수를 다음과 같이 설정
+
+```
+#!/bin/bash
+
+# 환경 변수 설정
+export DISCORD_BOT_TOKEN='your_discord_bot_token'
+export LOSTARK_API_KEY='your_lostark_api_key'
+
+# 봇 실행
+python3 bot.py
+```
 
 ### 5️⃣ 봇 실행
 
