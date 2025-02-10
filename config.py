@@ -4,11 +4,12 @@
 """
 
 # config.py
-from secret import token  # 디스코드 봇 토큰 가져오기
+# from secret import token  # 디스코드 봇 토큰 가져오기
 
 # 클라우드에서 환경변수로 토큰을 지정해서 사용하기 위한 코드
-# import os
-# token = os.getenv("DISCORD_BOT_TOKEN")
+import os
+token = os.getenv("DISCORD_BOT_TOKEN")
+YOUR_LOSTARK_API_KEY = os.getenv("YOUR_LOSTARK_API_KEY")
 
 def get_ytdl_options():
     """
