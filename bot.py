@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-# from secret import token   테스트용 secret 파일안에 key를 넣고 실행 코드
 import os
 from config import BOT_TOKEN, DEFAULT_PREFIX
 from core import music_bot
