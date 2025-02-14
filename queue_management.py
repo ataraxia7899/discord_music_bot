@@ -1,0 +1,1 @@
+queue = global_config.get_guild_queue(guild_id) 

@@ -1,9 +1,10 @@
 import discord
 from discord.ext import commands
 import os
-from config import BOT_TOKEN, DEFAULT_PREFIX
-from core import music_bot
+from config import BOT_TOKEN, DEFAULT_PREFIX, global_config, GuildState
 import asyncio
+from music_components.play_commands import YTDLSource
+from collections import deque
 
 """
 디스코드 봇의 메인 클래스와 실행 로직
@@ -23,21 +24,10 @@ class MusicBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
         super().__init__(command_prefix=DEFAULT_PREFIX, intents=intents)
-        self.music_core = music_bot
-        self.music_queue = music_bot.music_queue
-        self.current_track = music_bot.current_track
-        self.current_track_start_time = music_bot.current_track_start_time
-        self.repeat_mode = music_bot.repeat_mode
-        self.auto_play_enabled = music_bot.auto_play_enabled
-
-    # 서버 상태 접근 메서드 추가
-    def get_server_state(self, guild_id: int):
-        """서버별 음악 상태를 가져옵니다."""
-        return self.music_core.get_server_state(guild_id)
-
-    def clear_server_state(self, guild_id: int):
-        """서버의 음악 상태를 제거합니다."""
-        self.music_core.clear_server_state(guild_id)
+        self.music_states = {}  # 서버별 상태 관리
+        self.music_queue = deque()  # 기본 대기열 추가
+        self.current_track = None   # 현재 트랙 추가
+        self.repeat_mode = "none"   # 반복 모드 추가
         
     async def setup_hook(self):
         """
@@ -48,7 +38,7 @@ class MusicBot(commands.Bot):
         """
         print("Starting bot setup...")
         
-        # 컴포넌트 로딩 (수정된 부분)
+        # 컴포넌트 로딩
         for filename in os.listdir("./music_components"):
             if filename.endswith(".py") and not filename.startswith("__"):
                 try:
@@ -68,7 +58,9 @@ class MusicBot(commands.Bot):
         if member.id == self.user.id:  # 봇 자신의 상태 변경은 무시
             return
             
+        guild_id = member.guild.id
         voice_client = member.guild.voice_client
+        
         if voice_client and voice_client.channel:
             # 봇이 음성 채널에 연결되어 있는 경우
             
@@ -85,10 +77,63 @@ class MusicBot(commands.Bot):
                     if voice_client.is_playing():
                         voice_client.stop()
                     await voice_client.disconnect()
+                    global_config.clear_guild_state(guild_id)
                     
                     # 알림 메시지 전송
                     text_channel = member.guild.text_channels[0]  # 첫 번째 텍스트 채널에 알림
                     await text_channel.send("👋 음성 채널에 아무도 없어서 나갔습니다.")
+
+    async def get_guild_state(self, guild_id: int) -> GuildState:
+        """서버별 상태를 가져오거나 생성"""
+        if guild_id not in self.music_states:
+            self.music_states[guild_id] = GuildState()
+        return self.music_states[guild_id]
+
+    @commands.command(name='재생')
+    async def play(self, ctx, *, query: str):
+        guild_state = await self.get_guild_state(ctx.guild.id)
+        
+        # 트랙 추가
+        track = await self.get_track(query)
+        guild_state.music_queue.append(track)  # GuildState의 music_queue 사용
+        
+        if not ctx.voice_client.is_playing():
+            await self.play_next(ctx)
+
+    async def play_next(self, ctx):
+        guild_state = await global_config.get_guild_state(ctx.guild.id)
+        
+        if not guild_state.music_queue:
+            return
+        
+        track = guild_state.music_queue.popleft()
+        # 재생 로직...
+
+    @commands.command(name='큐')
+    async def queue(self, ctx):
+        guild_state = await global_config.get_guild_state(ctx.guild.id)
+        
+        if not guild_state.music_queue:
+            await ctx.send("재생 대기열이 비어있습니다.")
+            return
+        
+        # 큐 표시 로직...
+
+    @commands.command(name='나가기')
+    async def leave(self, ctx):
+        guild_state = await global_config.get_guild_state(ctx.guild.id)
+        guild_state.music_queue.clear()
+        guild_state.current_track = None
+        await ctx.voice_client.disconnect()
+
+    @play.error
+    async def play_error(self, ctx, error):
+        if isinstance(error, AttributeError):
+            await ctx.send("음악 재생 중 오류가 발생했습니다. 봇의 상태를 초기화합니다.")
+            await global_config.clear_guild_state(ctx.guild.id)
+
+    async def get_track(self, query: str):
+        return await YTDLSource.from_query(query, loop=self.loop)
 
 def main():
     bot = MusicBot()

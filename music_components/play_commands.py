@@ -6,13 +6,37 @@ import time
 import sys
 import os
 import functools  # 추가
+import logging
+from functools import wraps
+from typing import Callable, Any, Optional
 
 # 상위 디렉토리를 path에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import get_ytdl_options, ffmpeg_options
+from config import get_ytdl_options, ffmpeg_options, global_config, Track, get_optimized_ffmpeg_options
 # StreamPlayer import 추가
 from music_components.music.player import StreamPlayer
 from music_components.music.player import YTDLSource
+
+logger = logging.getLogger(__name__)
+
+class AudioPlayerError(Exception):
+    """오디오 플레이어 관련 예외"""
+    pass
+
+def handle_voice_errors(func: Callable) -> Callable:
+    """음성 관련 에러를 처리하는 데코레이터"""
+    @wraps(func)
+    async def wrapper(ctx_or_interaction: Any, *args, **kwargs):
+        try:
+            return await func(ctx_or_interaction, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in {func.__name__}: {str(e)}", exc_info=True)
+            error_message = f"음성 처리 중 오류 발생: {str(e)}"
+            if hasattr(ctx_or_interaction, 'response'):
+                await ctx_or_interaction.response.send_message(error_message, ephemeral=True)
+            else:
+                await ctx_or_interaction.send(error_message)
+    return wrapper
 
 # 유튜브 동영상을 디스코드 봇에서 재생하기 위한 클래스 정의
 def get_optimized_ytdl_options():
@@ -161,148 +185,43 @@ class YTDLSource:
             raise ValueError(f"음악을 처리하는 중 오류가 발생했습니다: {str(e)}")
 
 # 다음 곡 재생 함수 정의 수정
-async def play_next_song(voice_client, bot, disconnect_on_empty=True):
-    """
-    대기열의 다음 곡을 재생하는 함수
-    
-    Args:
-        voice_client: 디스코드 음성 클라이언트
-        bot: 디스코드 봇 인스턴스
-        disconnect_on_empty (bool): 대기열이 비었을 때 자동 퇴장 여부
-    """
+async def play_next_song(voice_client, bot, guild_id, disconnect_on_empty=True):
+    """다음 곡을 재생합니다."""
     try:
-        if not voice_client or not voice_client.is_connected():
-            print("Voice client is not connected")
-            return
+        server_state = global_config.get_guild_queue(guild_id)
+        repeat_mode = global_config.get_repeat_mode(guild_id)
+        current_track = global_config.get_current_track(guild_id)
 
-        next_track = None
-        retry_count = 0
-        max_retries = 3
-
-        async def try_play_track(track):
-            """
-            트랙 재생을 시도하는 내부 함수
-            
-            Args:
-                track: 재생할 트랙 객체
-            
-            Returns:
-                bool: 재생 성공 여부
-            """
-            nonlocal retry_count
-            try:
-                if not voice_client.is_connected():
-                    print("Voice client disconnected")
-                    return False
-
-                if voice_client.is_playing():
-                    voice_client.stop()
-                
-                await asyncio.sleep(0.5)  # 재생 사이에 약간의 지연 추가
-                
-                # 새로운 스트림 URL 가져오기
-                new_data = await bot.loop.run_in_executor(None, 
-                    lambda: YTDLSource._ytdl.extract_info(track.webpage_url, download=False))
-                
-                if not new_data:
-                    raise ValueError("Failed to get track data")
-
-                stream_url = new_data.get('url')
-                if not stream_url and 'formats' in new_data:
-                    formats = new_data['formats']
-                    audio_formats = [f for f in formats if f.get('acodec') != 'none']
-                    if audio_formats:
-                        stream_url = audio_formats[0]['url']
-
-                if not stream_url:
-                    raise ValueError("No valid stream URL found")
-
-                # 직접 FFmpegOpusAudio 생성
-                audio = discord.FFmpegOpusAudio(
-                    stream_url,
-                    bitrate=128,
-                    before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-                    options='-vn'
-                )
-
-                def after_playing(error):
-                    if error:
-                        print(f"Playback error: {error}")
-                    asyncio.run_coroutine_threadsafe(
-                        handle_playback_error(error),
-                        bot.loop
-                    )
-
-                voice_client.play(audio, after=after_playing)
-                return True
-
-            except Exception as e:
-                print(f"Play attempt failed: {e}")
-                retry_count += 1
-                if retry_count < max_retries:
-                    await asyncio.sleep(1)  # 재시도 전 대기
-                    return await try_play_track(track)
-                return False
-
-        async def handle_playback_error(error):
-            if error:
-                print(f"Playback error occurred: {error}")
-                await play_next_song(voice_client, bot)
-            else:
-                # 정상적으로 곡이 끝난 경우
-                await play_next_song(voice_client, bot)
-
-        # 다음 트랙 선택
-        if bot.repeat_mode == "current" and bot.current_track:
-            next_track = bot.current_track
-        elif bot.music_queue:
-            next_track = bot.music_queue.popleft()
-            if isinstance(next_track, QueuedTrack) and not next_track._loaded:
-                try:
-                    await next_track.load(bot.loop)
-                except Exception as e:
-                    print(f"Failed to load next track: {e}")
-                    return await play_next_song(voice_client, bot)
-
-            if bot.repeat_mode == "queue":
-                bot.music_queue.append(bot.current_track)
+        if repeat_mode == "current" and current_track:
+            next_track = current_track
+        elif server_state:
+            next_track = server_state.popleft()
+            if repeat_mode == "queue" and current_track:
+                server_state.append(current_track)
+        else:
+            next_track = None
 
         if next_track:
-            bot.current_track = next_track
-            bot.current_track_start_time = time.time()
-            
-            success = await try_play_track(next_track)
-            if success:
-                # 재생 알림 전송
-                embed = discord.Embed(
-                    title="🎵 다음 곡 재생",
-                    description=f"[{next_track.title}]({next_track.data.get('webpage_url', 'https://www.youtube.com')})",
-                    color=discord.Color.green()
+            global_config.set_current_track(guild_id, next_track)
+            try:
+                audio = discord.FFmpegOpusAudio(
+                    next_track.url,
+                    **ffmpeg_options
                 )
-                if len(bot.music_queue) > 0:
-                    embed.set_footer(text=f"대기열: {len(bot.music_queue)}곡 남음")
-
-                try:
-                    text_channel = voice_client.channel.guild.text_channels[0]
-                    await text_channel.send(embed=embed)
-                except Exception as e:
-                    print(f"Failed to send next track notification: {e}")
-            else:
-                print("Failed to play track, skipping to next")
-                await play_next_song(voice_client, bot)
-        else:
-            if disconnect_on_empty and voice_client.is_connected():
-                try:
-                    text_channel = voice_client.channel.guild.text_channels[0]
-                    await text_channel.send("🎵 모든 곡이 재생되었습니다.")
-                except Exception as e:
-                    print(f"Failed to send completion message: {e}")
-                await voice_client.disconnect()
+                voice_client.play(audio, after=lambda e: 
+                    asyncio.run_coroutine_threadsafe(
+                        play_next_song(voice_client, bot, guild_id), 
+                        bot.loop
+                    )
+                )
+            except Exception as e:
+                print(f"Error playing next song: {e}")
+                await play_next_song(voice_client, bot, guild_id)
+        elif disconnect_on_empty:
+            await voice_client.disconnect()
 
     except Exception as e:
         print(f"Error in play_next_song: {e}")
-        if voice_client and voice_client.is_connected():
-            await voice_client.disconnect()
 
 # 서버별 음악 상태를 관리하는 클래스
 class ServerMusicState:
@@ -472,7 +391,7 @@ async def play(ctx, *, query: str):
                 def after_playing(error):
                     if error:
                         print(f"재생 중 오류 발생: {error}")
-                    coro = play_next_song(voice_client, ctx.bot)
+                    coro = play_next_song(voice_client, ctx.bot, ctx.guild.id)
                     fut = asyncio.run_coroutine_threadsafe(coro, ctx.bot.loop)
                     try:
                         fut.result()
@@ -588,7 +507,7 @@ async def play_slash(interaction: discord.Interaction, query: str):
                     def after_playing(error):
                         if error:
                             print(f"재생 중 오류 발생: {error}")
-                        coro = play_next_song(voice_client, interaction.client)
+                        coro = play_next_song(voice_client, interaction.client, interaction.guild.id)
                         fut = asyncio.run_coroutine_threadsafe(coro, interaction.client.loop)
                         try:
                             fut.result()
@@ -735,3 +654,35 @@ async def update_guild_voice_state(ctx_or_interaction, voice_client):
 
     server_state = bot.get_server_state(guild_id)
     server_state.voice_client = voice_client
+
+class AudioPlayer:
+    def __init__(self, voice_client, guild_id: int, bot):
+        self.voice_client = voice_client
+        self.guild_id = guild_id
+        self.bot = bot
+        self._lock = asyncio.Lock()
+
+    async def play_audio(self, track: Track, after_callback: Optional[Callable] = None):
+        """오디오 재생을 처리하는 메서드"""
+        async with self._lock:
+            try:
+                audio = await self._create_audio_source(track.url)
+                self.voice_client.play(audio, after=after_callback)
+            except Exception as e:
+                logger.error(f"Failed to play audio: {e}")
+                raise AudioPlayerError(f"재생 실패: {str(e)}")
+
+    async def _create_audio_source(self, url: str):
+        """오디오 소스 생성을 처리하는 메서드"""
+        try:
+            return await discord.FFmpegOpusAudio.from_probe(
+                url,
+                **get_optimized_ffmpeg_options()
+            )
+        except Exception:
+            return await discord.FFmpegOpusAudio.from_probe(
+                url,
+                bitrate=96,
+                before_options='-reconnect 1 -reconnect_streamed 1',
+                options='-vn -bufsize 64k'
+            )

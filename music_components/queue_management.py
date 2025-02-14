@@ -2,6 +2,13 @@ import discord
 from discord.ext import commands
 import time
 from music_components.play_commands import YTDLSource
+from config import global_config
+from functools import lru_cache
+from typing import List, Optional
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import logging
+from config import Track
 
 """
 대기열 관리 관련 명령어들을 포함하는 모듈
@@ -163,7 +170,10 @@ async def clear_queue_slash(interaction: discord.Interaction):
 # /대기열 - 현재 대기열 표시
 @commands.command(name="대기열", description="현재 대기열을 표시합니다.")
 async def show_queue(ctx):
-    if not ctx.bot.music_queue:
+    guild_id = ctx.guild.id
+    queue = global_config.get_guild_queue(guild_id)
+    
+    if not queue:
         embed = discord.Embed(
             title="대기열",
             description="대기열이 비어 있습니다.",
@@ -173,7 +183,7 @@ async def show_queue(ctx):
         return
 
     queue_list = []
-    for i, track in enumerate(ctx.bot.music_queue, 1):
+    for i, track in enumerate(queue, 1):
         queue_list.append(f"{i}. [{track.title}]({track.data.get('webpage_url', 'https://www.youtube.com')})")
 
     embed = discord.Embed(
@@ -181,7 +191,7 @@ async def show_queue(ctx):
         description="\n".join(queue_list),
         color=discord.Color.blue()
     )
-    embed.set_footer(text=f"총 {len(ctx.bot.music_queue)}곡")
+    embed.set_footer(text=f"총 {len(queue)}곡")
     await ctx.send(embed=embed)
 
 # 슬래시 명령어 정의
@@ -206,6 +216,38 @@ async def show_queue_slash(interaction: discord.Interaction):
     )
     embed.set_footer(text=f"총 {len(interaction.client.music_queue)}곡")
     await interaction.response.send_message(embed=embed)
+
+logger = logging.getLogger(__name__)
+
+class QueueManager:
+    def __init__(self):
+        self._executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="queue_worker")
+        self._cache = {}
+        self._lock = asyncio.Lock()
+
+    async def add_track(self, guild_id: int, track: Track):
+        """트랙을 대기열에 안전하게 추가"""
+        async with self._lock:
+            state = await global_config.get_guild_state(guild_id)
+            state.music_queue.append(track)
+
+    async def remove_track(self, guild_id: int, index: int) -> Optional[Track]:
+        """대기열에서 트랙을 안전하게 제거"""
+        async with self._lock:
+            state = await global_config.get_guild_state(guild_id)
+            if 0 <= index < len(state.music_queue):
+                return state.music_queue.pop(index)
+            return None
+
+    async def clear_queue(self, guild_id: int):
+        """대기열을 안전하게 초기화"""
+        async with self._lock:
+            state = await global_config.get_guild_state(guild_id)
+            state.music_queue.clear()
+
+    def __del__(self):
+        """리소스 정리"""
+        self._executor.shutdown(wait=True)
 
 # setup 함수 정의
 async def setup(bot):

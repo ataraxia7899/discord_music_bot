@@ -4,16 +4,45 @@
 """
 
 from collections import deque
+from dataclasses import dataclass
+from typing import Optional, Deque
+from datetime import datetime
+import asyncio
+import logging
+
+@dataclass
+class Track:
+    """음악 트랙 정보를 담는 데이터 클래스"""
+    title: str
+    url: str
+    duration: int
+    webpage_url: str
+    thumbnail_url: Optional[str] = None
+    author: Optional[str] = None
 
 class ServerMusicState:
     def __init__(self):
-        self.music_queue = deque()
-        self.current_track = None
-        self.current_track_start_time = None
-        self.repeat_mode = "none"
+        self.music_queue: Deque[Track] = deque()
+        self.current_track: Optional[Track] = None
+        self.start_time: Optional[datetime] = None
         self.voice_client = None
         self.text_channel = None
-        self.auto_play_enabled = False
+        self._repeat_mode: str = "none"
+        self._volume: float = 1.0
+        self._is_playing: bool = False
+        self._lock = asyncio.Lock()
+    
+    @property
+    def is_playing(self) -> bool:
+        return self._is_playing and self.voice_client and self.voice_client.is_playing()
+    
+    async def add_track(self, track: Track):
+        async with self._lock:
+            self.music_queue.append(track)
+    
+    async def clear_queue(self):
+        async with self._lock:
+            self.music_queue.clear()
 
 class MusicBotCore:
     """
