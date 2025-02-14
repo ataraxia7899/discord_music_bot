@@ -27,68 +27,45 @@ async def skip_to_next(ctx):
         await ctx.send(embed=embed)
         return
 
-    music_queue = global_config.get_guild_queue(guild_id)
-    repeat_mode = global_config.get_repeat_mode(guild_id)
-    current_track = global_config.get_current_track(guild_id)
-
-    if not music_queue and not global_config.get_auto_play(guild_id):
-        embed = discord.Embed(
-            title="알림",
-            description="현재 곡이 마지막 곡입니다.",
-            color=discord.Color.orange()
-        )
-        await ctx.send(embed=embed)
-        return
-
     try:
-        # 현재 트랙 저장
-        if repeat_mode == "current" and current_track:
-            next_track = current_track
-        elif music_queue:
-            next_track = music_queue.popleft()
-            if repeat_mode == "queue" and current_track:
-                music_queue.append(current_track)
-        else:
-            next_track = None
+        # 현재 재생 중인 곡 정지
+        if voice_client.is_playing():
+            voice_client.stop()
 
-        if next_track:
-            global_config.set_current_track(guild_id, next_track)
+        def after_playing(error):
+            if error:
+                print(f"재생 중 오류 발생: {error}")
+            coro = play_next_song(voice_client, ctx.bot, guild_id)  # guild_id 추가
+            fut = asyncio.run_coroutine_threadsafe(coro, ctx.bot.loop)
+            try:
+                fut.result()
+            except Exception as e:
+                print(f'재생 후 처리 중 오류 발생: {e}')
+
+        # 다음 곡 재생
+        guild_state = await ctx.bot.get_guild_state(guild_id)
+        if guild_state.music_queue:
+            next_track = guild_state.music_queue[0]  # 다음 곡 미리보기
             embed = discord.Embed(
                 title="다음 곡으로 넘어가는 중...",
                 description=f"[{next_track.title}]({next_track.data.get('webpage_url', 'https://www.youtube.com')})",
                 color=discord.Color.green()
             )
             await ctx.send(embed=embed)
-
-        # 현재 재생 중인 곡 정지
-        if voice_client.is_playing():
-            voice_client.stop()
-
-        # 다음 곡 재생 시도
-        try:
-            if next_track:
-                # 새로운 오디오 소스 생성
-                audio = discord.FFmpegOpusAudio(
-                    next_track.url,
-                    bitrate=128,
-                    before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-                    options='-vn'
-                )
-                
-                # 다음 곡 설정 및 재생
-                ctx.bot.current_track = next_track
-                
-                voice_client.play(audio, after=lambda e: asyncio.run_coroutine_threadsafe(
-                    play_next_song(voice_client, ctx.bot), ctx.bot.loop))
-            else:
-                await ctx.send("재생할 다음 곡이 없습니다.")
-                if voice_client.is_connected():
-                    await voice_client.disconnect()
-                    
-        except Exception as e:
-            print(f"재생 시도 중 오류 발생: {e}")
-            global_config.set_current_track(guild_id, current_track)  # 오류 시 이전 트랙 복원
-            await ctx.send("다음 곡 재생 중 오류가 발생했습니다.")
+            
+            audio = await discord.FFmpegOpusAudio.from_probe(
+                next_track.url,
+                **ffmpeg_options
+            )
+            voice_client.play(audio, after=after_playing)
+        else:
+            embed = discord.Embed(
+                title="재생 종료",
+                description="모든 곡의 재생이 끝났습니다.",
+                color=discord.Color.blue()
+            )
+            await ctx.send(embed=embed)
+            await voice_client.disconnect()
 
     except Exception as e:
         print(f"다음 곡 재생 중 오류 발생: {e}")

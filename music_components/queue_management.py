@@ -9,6 +9,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import logging
 from config import Track
+from datetime import datetime
 
 """
 대기열 관리 관련 명령어들을 포함하는 모듈
@@ -29,18 +30,24 @@ async def now_playing(ctx):
         - 재생 시간 (현재/전체)
         - 대기열 상태
     """
-    if not ctx.bot.current_track:
+    guild_state = await ctx.bot.get_guild_state(ctx.guild.id)
+    
+    if not guild_state.current_track:
         await ctx.send("현재 재생 중인 곡이 없습니다.")
         return
 
     try:
-        title = ctx.bot.current_track.title
-        url = ctx.bot.current_track.data.get('webpage_url', 'https://www.youtube.com')
-        duration = ctx.bot.current_track.data.get('duration', 0)
+        current_track = guild_state.current_track
+        title = current_track.title
+        url = current_track.data.get('webpage_url', 'https://www.youtube.com')
+        duration = current_track.data.get('duration', 0)
         minutes_total, seconds_total = divmod(duration, 60)
 
-        if ctx.bot.current_track_start_time:
-            elapsed_time_seconds = int(time.time() - ctx.bot.current_track_start_time)
+        # 시작 시간이 있을 경우에만 경과 시간 계산
+        if guild_state.start_time:
+            elapsed_time_seconds = int((datetime.now() - guild_state.start_time).total_seconds())
+            # 총 길이를 넘지 않도록 제한
+            elapsed_time_seconds = min(elapsed_time_seconds, duration)
         else:
             elapsed_time_seconds = 0
 
@@ -58,10 +65,10 @@ async def now_playing(ctx):
         )
         embed.add_field(
             name="📂 대기열",
-            value=f"{len(ctx.bot.music_queue)}곡 남음" if ctx.bot.music_queue else "대기열이 비어 있습니다.",
+            value=f"{len(guild_state.music_queue)}곡 남음" if guild_state.music_queue else "대기열이 비어 있습니다.",
             inline=False
         )
-        embed.set_thumbnail(url="https://img.youtube.com/vi/{}/hqdefault.jpg".format(ctx.bot.current_track.data.get('id', '')))
+        embed.set_thumbnail(url=f"https://img.youtube.com/vi/{current_track.data.get('id', '')}/hqdefault.jpg")
         embed.set_footer(text="음악 분위기를 즐겨보세요! 🎶")
 
         await ctx.send(embed=embed)

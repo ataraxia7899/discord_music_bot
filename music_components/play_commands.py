@@ -9,6 +9,7 @@ import functools  # 추가
 import logging
 from functools import wraps
 from typing import Callable, Any, Optional
+from datetime import datetime
 
 # 상위 디렉토리를 path에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -185,40 +186,48 @@ class YTDLSource:
             raise ValueError(f"음악을 처리하는 중 오류가 발생했습니다: {str(e)}")
 
 # 다음 곡 재생 함수 정의 수정
-async def play_next_song(voice_client, bot, guild_id, disconnect_on_empty=True):
-    """다음 곡을 재생합니다."""
+async def play_next_song(voice_client, bot, guild_id):
+    guild_state = await bot.get_guild_state(guild_id)
+    
     try:
-        server_state = global_config.get_guild_queue(guild_id)
-        repeat_mode = global_config.get_repeat_mode(guild_id)
-        current_track = global_config.get_current_track(guild_id)
-
-        if repeat_mode == "current" and current_track:
-            next_track = current_track
-        elif server_state:
-            next_track = server_state.popleft()
-            if repeat_mode == "queue" and current_track:
-                server_state.append(current_track)
-        else:
-            next_track = None
-
-        if next_track:
-            global_config.set_current_track(guild_id, next_track)
+        if guild_state.music_queue:
+            track = guild_state.music_queue.popleft()
+            guild_state.current_track = track
+            guild_state.start_time = datetime.now()
+            
             try:
-                audio = discord.FFmpegOpusAudio(
-                    next_track.url,
+                audio = await discord.FFmpegOpusAudio.from_probe(
+                    track.url,
                     **ffmpeg_options
                 )
-                voice_client.play(audio, after=lambda e: 
-                    asyncio.run_coroutine_threadsafe(
-                        play_next_song(voice_client, bot, guild_id), 
-                        bot.loop
-                    )
-                )
+                
+                def after_playing(error):
+                    if error:
+                        print(f"재생 중 오류 발생: {error}")
+                    coro = play_next_song(voice_client, bot, guild_id)
+                    fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
+                    try:
+                        fut.result()
+                    except Exception as e:
+                        print(f'재생 후 처리 중 오류 발생: {e}')
+
+                voice_client.play(audio, after=after_playing)
+                
             except Exception as e:
                 print(f"Error playing next song: {e}")
                 await play_next_song(voice_client, bot, guild_id)
-        elif disconnect_on_empty:
-            await voice_client.disconnect()
+        else:
+            # 모든 곡이 끝났을 때
+            if voice_client and voice_client.is_connected():
+                text_channel = guild_state.text_channel
+                if text_channel:
+                    embed = discord.Embed(
+                        title="재생 종료",
+                        description="모든 곡의 재생이 끝났습니다.",
+                        color=discord.Color.blue()
+                    )
+                    await text_channel.send(embed=embed)
+                await voice_client.disconnect()
 
     except Exception as e:
         print(f"Error in play_next_song: {e}")
