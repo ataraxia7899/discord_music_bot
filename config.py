@@ -21,12 +21,12 @@ logger = logging.getLogger(__name__)
 # 1번은 secret.py 파일에서 토큰 가져오기, 2번은 환경변수로 토큰 지정하기 방법 중 하나를 선택해서 사용하세요.
 
 # config.py 파일에서 토큰을 가져오기 위한 코드 (1번)
-from secret import token  # 디스코드 봇 토큰 가져오기
+#from secret import token  # 디스코드 봇 토큰 가져오기
 
 # 클라우드에서 환경변수로 토큰을 지정해서 사용하기 위한 코드 (2번)
-# import os
-# token = os.getenv("DISCORD_BOT_TOKEN")
-# YOUR_LOSTARK_API_KEY = os.getenv("YOUR_LOSTARK_API_KEY")
+import os
+token = os.getenv("DISCORD_BOT_TOKEN")
+YOUR_LOSTARK_API_KEY = os.getenv("YOUR_LOSTARK_API_KEY")
 
 def get_ytdl_options():
     """
