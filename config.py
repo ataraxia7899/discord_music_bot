@@ -4,7 +4,7 @@
 """
 
 from collections import deque
-from typing import Dict, Optional, TypedDict, Any
+from typing import Dict, Optional, TypedDict, Any, Deque
 from dataclasses import dataclass, field
 import logging
 import asyncio
