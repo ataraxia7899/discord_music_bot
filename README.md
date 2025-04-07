@@ -10,12 +10,14 @@ YouTube에서 음악을 검색하고 스트리밍하며, 음성 채널에서 고
 
 ```
 discord_music_bot/
-├── bot.py                # 봇의 메인 코드
-├── config.py            # 설정 및 환경 변수 관리
-├── music_core.py        # 음악 재생 핵심 기능
-├── music_player.py      # 음악 재생 관리자
-├── queue_manager.py     # 대기열 관리
-└── requirements.txt     # 의존성 패키지 목록
+├── music_components/          # 음악 관련 컴포넌트
+│   ├── __init__.py
+│   ├── music_core.py         # 음악 재생 핵심 기능
+│   ├── music_player.py       # 음악 재생 관리자
+│   └── queue_manager.py      # 대기열 관리
+├── bot.py                    # 봇의 메인 코드
+├── config.py                 # 설정 및 환경 변수 관리
+└── requirements.txt          # 의존성 패키지 목록
 ```
 
 ## 🔄 최근 업데이트 내용
@@ -81,7 +83,8 @@ pip install -r requirements.txt
 ```
 
 2. FFmpeg 설치
-- Windows: chocolatey 또는 공식 웹사이트에서 다운로드
+- Windows: `winget install ffmpeg`
+  - 또는 [FFmpeg 공식 웹사이트](https://ffmpeg.org/download.html)에서 다운로드
 - Linux: `sudo apt install ffmpeg`
 - macOS: `brew install ffmpeg`
 
@@ -102,6 +105,7 @@ python bot.py
 1. ~~채팅방 문제: 다른 채널에서 사용해도 메인 채널에 메시지 출력~~ (수정됨)
 2. ~~플레이리스트 로딩 속도 저하~~ (최적화됨)
 3. ~~반복 모드 버그~~ (수정됨)
+4. FFmpeg 경로 문제
 
 ## 🔧 추가 예정 기능
 
