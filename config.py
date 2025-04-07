@@ -11,7 +11,6 @@ import asyncio
 from datetime import datetime
 import os
 from dotenv import load_dotenv
-from core import Track  # core.py의 Track 클래스를 사용
 
 # 환경 변수 로드
 load_dotenv()
@@ -26,7 +25,16 @@ logger = logging.getLogger(__name__)
 # 클라우드에서 환경변수로 토큰을 지정해서 사용하기 위한 코드 (2번)
 import os
 token = os.getenv("DISCORD_BOT_TOKEN")
-YOUR_LOSTARK_API_KEY = os.getenv("YOUR_LOSTARK_API_KEY")
+
+@dataclass
+class Track:
+    """음악 트랙 정보를 담는 데이터 클래스"""
+    title: str
+    url: str
+    duration: int
+    webpage_url: str
+    thumbnail_url: Optional[str] = None
+    author: Optional[str] = None
 
 def get_ytdl_options():
     """
@@ -49,6 +57,7 @@ def get_ytdl_options():
         'skip_unavailable_fragments': True,
         'ignoreerrors': True,
         'no_color': True,
+        'ffmpeg_location': 'ffmpeg',  # 시스템 전역 설치된 FFmpeg 사용
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'opus',
@@ -81,7 +90,8 @@ def get_optimized_ffmpeg_options():
             '-analyzeduration 1M '
             '-rw_timeout 15000000 '  # 읽기/쓰기 타임아웃 증가
             '-timeout 15000000'      # 전체 타임아웃 증가
-        )
+        ),
+        'executable': 'ffmpeg'  # 시스템 전역 설치된 FFmpeg 사용
     }
 
 def get_optimized_ytdl_options():
@@ -114,29 +124,18 @@ ffmpeg_options = {
 
 # 봇 설정
 BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')  # 환경 변수에서 토큰 가져오기
-# BOT_TOKEN = token  # secret.py에서 가져온 토큰 사용
 DEFAULT_PREFIX = os.getenv('BOT_PREFIX', '!')  # 환경 변수에서 접두사 가져오기, 기본값 '!'
 
-@dataclass
-class Track:
-    """음악 트랙 정보를 담는 데이터 클래스"""
-    title: str
-    url: str
-    duration: int
-    webpage_url: str
-    thumbnail_url: Optional[str] = None
-    author: Optional[str] = None
-
-@dataclass
 class GuildState:
-    """서버별 상태를 관리하는 데이터 클래스"""
-    music_queue: deque[Track] = field(default_factory=deque)
-    current_track: Optional[Track] = None
-    voice_client: Optional[Any] = None
-    text_channel: Optional[Any] = None
-    repeat_mode: str = "none"
-    volume: float = 1.0
-    start_time: Optional[datetime] = None
+    """서버별 상태를 관리하는 클래스"""
+    def __init__(self):
+        self.music_queue: deque[Track] = deque()
+        self.current_track: Optional[Track] = None
+        self.voice_client: Optional[Any] = None
+        self.text_channel: Optional[Any] = None
+        self.repeat_mode: str = "none"
+        self.volume: float = 1.0
+        self.start_time: Optional[datetime] = None
 
 class GlobalConfig:
     def __init__(self):
@@ -162,7 +161,7 @@ class GlobalConfig:
             if guild_id in self._states:
                 self._states[guild_id] = GuildState()
 
-    def get_guild_queue(self, guild_id: int):
+    def get_guild_queue(self, guild_id: int) -> deque[Track]:
         return self._states.get(guild_id, GuildState()).music_queue
 
 # 전역 설정 인스턴스 생성
