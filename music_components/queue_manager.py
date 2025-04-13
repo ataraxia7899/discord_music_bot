@@ -170,14 +170,28 @@ class QueueManager:
         self.music_manager = get_music_manager(bot)
         self._executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="queue_worker")
         self._lock = asyncio.Lock()
+        self._cache = {}
 
     async def add_track(self, guild_id: int, track: Track) -> int:
         """트랙을 대기열에 추가하고 위치를 반환"""
         state = self.music_manager.get_server_state(guild_id)
         async with self._lock:
+            if len(state.music_queue) >= 50:
+                raise ValueError("대기열이 가득 찼습니다 (최대 50곡)")
+            
             position = len(state.music_queue)
             await state.add_track(track)
+            self._update_queue_cache(guild_id)
             return position + 1
+
+    def _update_queue_cache(self, guild_id: int):
+        """대기열 캐시 업데이트"""
+        state = self.music_manager.get_server_state(guild_id)
+        if len(state.music_queue) > 0:
+            self._cache[guild_id] = {
+                'last_updated': datetime.now(),
+                'queue': list(state.music_queue)
+            }
 
     async def remove_track(self, guild_id: int, index: int) -> Optional[Track]:
         """대기열에서 특정 위치의 트랙을 제거"""
@@ -203,10 +217,22 @@ class QueueManager:
         """대기열을 무작위로 섞음"""
         state = self.music_manager.get_server_state(guild_id)
         async with self._lock:
+            # 현재 재생 중인 곡 제외
+            current = state.current_track
+            
+            # 대기열을 리스트로 변환하여 섞기
             queue_list = list(state.music_queue)
-            random.shuffle(queue_list)
-            state.music_queue.clear()
-            state.music_queue.extend(queue_list)
+            if len(queue_list) > 1:  # 2곡 이상일 때만 섞기
+                random.shuffle(queue_list)
+                
+                # 섞인 대기열 적용
+                state.music_queue.clear()
+                state.music_queue.extend(queue_list)
+                
+                # 캐시 갱신
+                self._update_queue_cache(guild_id)
+                return True
+            return False
 
     async def clear_queue(self, guild_id: int):
         """대기열을 비움"""
@@ -218,7 +244,6 @@ class QueueManager:
         state = self.music_manager.get_server_state(guild_id)
         current = state.current_track
         queue = list(state.music_queue)
-        
         return {
             'current': current,
             'queue': queue,
@@ -240,7 +265,7 @@ def get_queue_manager(bot) -> QueueManager:
         queue_manager = QueueManager(bot)
     return queue_manager
 
-async def setup(bot):
+async def setup(bot):    
     """봇에 대기열 관련 명령어들을 등록"""
     queue_commands = QueueCommands(bot)
     

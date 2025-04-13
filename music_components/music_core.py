@@ -4,7 +4,6 @@
 """
 
 from collections import deque
-from dataclasses import dataclass
 from typing import Optional, Deque
 from datetime import datetime
 import asyncio
@@ -25,18 +24,39 @@ class ServerMusicState:
         self._volume: float = 1.0
         self._is_playing: bool = False
         self._lock = asyncio.Lock()
+        self._previous_queue = []
     
     @property
     def is_playing(self) -> bool:
         return self._is_playing and self.voice_client and self.voice_client.is_playing()
     
     async def add_track(self, track: Track):
+        """트랙을 대기열에 추가"""
         async with self._lock:
             self.music_queue.append(track)
     
     async def clear_queue(self):
+        """대기열 초기화"""
         async with self._lock:
             self.music_queue.clear()
+            self._previous_queue.clear()
+
+    async def handle_repeat_mode(self) -> Optional[Track]:
+        """반복 모드 처리"""
+        if not self.current_track:
+            return None
+            
+        if self._repeat_mode == "single":
+            return self.current_track
+        elif self._repeat_mode == "all" and not self.music_queue:
+            # 전체 반복 모드에서 대기열이 비었을 때
+            self.music_queue.extend(self._previous_queue)
+            self._previous_queue.clear()
+            
+        if self._repeat_mode == "all":
+            self._previous_queue.append(self.current_track)
+            
+        return None
 
 class MusicManager:
     def __init__(self, bot):
@@ -55,48 +75,51 @@ class MusicManager:
         guild_state = self.get_server_state(guild_id)
         
         try:
-            if guild_state.music_queue:
-                track = guild_state.music_queue.popleft()
-                guild_state.current_track = track
+            if not voice_client or not voice_client.is_connected():
+                logger.error("Voice client is not connected")
+                return
+
+            repeat_track = await guild_state.handle_repeat_mode()
+            next_track = repeat_track or (guild_state.music_queue.popleft() if guild_state.music_queue else None)
+            
+            if next_track:
+                guild_state.current_track = next_track
                 guild_state.start_time = datetime.now()
-                
+                guild_state._is_playing = True
+
                 try:
-                    ffmpeg_options = get_optimized_ffmpeg_options()
-                    audio = await discord.FFmpegOpusAudio.from_probe(
-                        track.url,
-                        **ffmpeg_options
+                    # 새로운 음원 생성
+                    source = await discord.FFmpegOpusAudio.from_probe(
+                        next_track.url,
+                        method='fallback',
+                        **get_optimized_ffmpeg_options()
                     )
-                    
+                    next_track.source = source  # 소스 저장
+
                     def after_playing(error):
                         if error:
                             logger.error(f"재생 중 오류 발생: {error}")
-                        coro = self.play_next_song(voice_client, guild_id)
-                        fut = asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
-                        try:
-                            fut.result()
-                        except Exception as e:
-                            logger.error(f'재생 후 처리 중 오류 발생: {e}')
-
-                    voice_client.play(audio, after=after_playing)
-                    
-                except Exception as e:
-                    logger.error(f"Error playing next song: {e}")
-                    await self.play_next_song(voice_client, guild_id)
-            else:
-                # 모든 곡이 끝났을 때
-                if voice_client and voice_client.is_connected():
-                    text_channel = guild_state.text_channel
-                    if text_channel:
-                        embed = discord.Embed(
-                            title="재생 종료",
-                            description="모든 곡의 재생이 끝났습니다.",
-                            color=discord.Color.blue()
+                        asyncio.run_coroutine_threadsafe(
+                            self.play_next_song(voice_client, guild_id),
+                            self.bot.loop
                         )
-                        await text_channel.send(embed=embed)
-                    await voice_client.disconnect()
+
+                    voice_client.play(source, after=after_playing)
+                    logger.info(f"재생 시작: {next_track.title}")
+
+                except Exception as e:
+                    logger.error(f"음원 생성 중 오류: {e}")
+                    guild_state._is_playing = False
+                    await self.play_next_song(voice_client, guild_id)
+
+            else:
+                guild_state._is_playing = False
+                if guild_state.text_channel:
+                    await guild_state.text_channel.send("🎵 재생할 곡이 없습니다.")
 
         except Exception as e:
-            logger.error(f"Error in play_next_song: {e}")
+            logger.error(f"재생 처리 중 오류: {e}")
+            guild_state._is_playing = False
 
     async def update_voice_state(self, guild_id: int, voice_client, text_channel=None):
         """서버의 음성 상태를 업데이트"""
@@ -108,7 +131,13 @@ class MusicManager:
 music_manager = None
 
 def get_music_manager(bot) -> MusicManager:
+    """MusicManager 인스턴스를 가져오거나 생성"""
     global music_manager
     if music_manager is None:
         music_manager = MusicManager(bot)
     return music_manager
+
+async def setup(bot):
+    """봇 설정에 필요한 초기화를 수행합니다."""
+    music_manager = get_music_manager(bot)
+    bot.music_manager = music_manager

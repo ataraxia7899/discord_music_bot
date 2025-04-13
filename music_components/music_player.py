@@ -34,39 +34,48 @@ class YTDLSource:
         self.duration = data.get('duration', 0)
 
     @classmethod
-    async def create_source(cls, query: str, *, loop=None, stream=True) -> 'YTDLSource':
+    async def create_source(cls, query: str, *, loop=None, stream=True) -> Track:
         """URL 또는 검색어로부터 음원 소스를 생성"""
         loop = loop or asyncio.get_event_loop()
-        
         try:
-            if query in cls._cache:
-                logger.info(f"캐시된 트랙 사용: {query}")
-                return cls._cache[query]
+            # 검색어 처리
+            if not query.startswith(('http://', 'https://')):
+                query = f"ytsearch:{query}"
 
+            # 음원 정보 추출
             data = await loop.run_in_executor(None, 
                 lambda: cls._ytdl.extract_info(query, download=False))
 
-            if not data:
-                raise ValueError("비디오 정보를 찾을 수 없습니다.")
-
             if 'entries' in data:
-                # 플레이리스트인 경우
-                entries = data['entries']
-                if not entries:
-                    raise ValueError("플레이리스트가 비어있습니다.")
-                data = entries[0]
+                data = data['entries'][0]
 
-            if not data.get('url'):
-                raise ValueError("스트림 URL을 찾을 수 없습니다.")
+            # FFmpeg 옵션 설정
+            ffmpeg_options = {
+                'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+                'options': '-vn'
+            }
 
-            ffmpeg_options = get_optimized_ffmpeg_options()
+            # 음원 소스 생성
             source = await discord.FFmpegOpusAudio.from_probe(
                 data['url'],
                 **ffmpeg_options
             )
 
-            track = cls(source, data=data)
-            cls._cache[query] = track
+            ytdl_source = cls(source, data=data)
+            
+            # Track 객체 생성
+            track = Track(
+                title=data.get('title', 'Unknown'),
+                url=data.get('url', ''),
+                duration=int(data.get('duration', 0)),
+                webpage_url=data.get('webpage_url', ''),
+                thumbnail_url=data.get('thumbnail', None),
+                author=data.get('uploader', None)
+            )
+            
+            track.source = source  # 소스 직접 할당
+            logger.info(f"트랙 생성 완료: {track.title}")
+            
             return track
 
         except Exception as e:
@@ -86,7 +95,6 @@ class MusicPlayer:
     async def play(self, ctx, *, query: str):
         """음악을 재생하거나 대기열에 추가하는 명령어"""
         try:
-            # 사용자가 음성 채널에 있는지 확인
             if not ctx.author.voice:
                 await ctx.send("먼저 음성 채널에 입장해주세요!")
                 return
@@ -96,19 +104,25 @@ class MusicPlayer:
 
             # 음성 채널 연결
             if not voice_client:
-                voice_client = await voice_channel.connect()
+                voice_client = await voice_channel.connect(timeout=180, reconnect=True)
             elif voice_client.channel != voice_channel:
                 await voice_client.move_to(voice_channel)
+
+            await ctx.send("🔍 검색 중...")  # 상태 메시지 추가
 
             # 음원 소스 생성
             try:
                 track = await YTDLSource.create_source(query, loop=self.bot.loop)
+                await ctx.send(f"✅ 찾음: **{track.title}**")
             except Exception as e:
                 await ctx.send(f"음원을 불러오는 중 오류가 발생했습니다: {str(e)}")
                 return
 
             guild_id = ctx.guild.id
             guild_state = self.music_manager.get_server_state(guild_id)
+            
+            # 음성 상태 업데이트
+            await self.music_manager.update_voice_state(guild_id, voice_client, ctx.channel)
 
             # 트랙 추가 및 재생
             if not voice_client.is_playing():
