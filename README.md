@@ -22,7 +22,7 @@ discord_music_bot/
 
 ## 🔄 최근 업데이트 내용
 
-### 1. 코드 구조 개선
+### 1. 코드 구조
 - 모듈화된 구조로 재설계
 - 각 컴포넌트의 역할 명확화
 - 중복 코드 제거 및 통합
@@ -43,7 +43,7 @@ discord_music_bot/
   - 자동 재연결 기능
   - 오류 발생 시 자동 다음곡 재생
 
-### 4. 대기열 관리 개선
+### 4. 대기열 관리
 - 서버별 독립적인 대기열 관리
 - 동시성 제어 강화
 - 반복 모드 버그 수정
@@ -82,9 +82,12 @@ discord_music_bot/
 pip install -r requirements.txt
 ```
 
-2. FFmpeg 설치
-- Windows: `winget install ffmpeg`
-  - 또는 [FFmpeg 공식 웹사이트](https://ffmpeg.org/download.html)에서 다운로드
+2. FFmpeg 설치 (택 1)
+- Windows:
+  ```bash
+  winget install ffmpeg
+  ```
+  > 💡 winget이 설치되어 있지 않다면: Windows 스토어에서 "앱 설치 관리자" 설치
 - Linux: `sudo apt install ffmpeg`
 - macOS: `brew install ffmpeg`
 
@@ -105,7 +108,7 @@ python bot.py
 1. ~~채팅방 문제: 다른 채널에서 사용해도 메인 채널에 메시지 출력~~ (수정됨)
 2. ~~플레이리스트 로딩 속도 저하~~ (최적화됨)
 3. ~~반복 모드 버그~~ (수정됨)
-4. FFmpeg 경로 문제
+4. ~~FFmpeg 경로 문제~~ (winget 설치로 해결됨)
 
 ## 🔧 추가 예정 기능
 
