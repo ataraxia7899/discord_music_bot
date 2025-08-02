@@ -38,6 +38,7 @@ class Track:
     source: Optional[Any] = None  # FFmpeg 소스 저장용 필드 추가
 
 def get_ytdl_options():
+    """YouTube 다운로드 옵션을 반환합니다."""
     return {
         'format': 'bestaudio/best',
         'quiet': True,
@@ -52,7 +53,14 @@ def get_ytdl_options():
         'extract_flat': False,
         'compat_opts': {'no-youtube-unavailable-videos': True},
         'geo_bypass': True,
-        'cachedir': False
+        'cachedir': False,
+        'socket_timeout': 10,  # 타임아웃 설정
+        'retries': 3,  # 재시도 횟수
+        'fragment_retries': 3,  # 프래그먼트 재시도
+        'skip_download': True,  # 다운로드 건너뛰기
+        'extractaudio': True,  # 오디오 추출
+        'audioformat': 'opus',  # 오디오 포맷
+        'audioquality': '96K'  # 오디오 품질
     }
 
 def get_optimized_ffmpeg_options():
@@ -62,10 +70,10 @@ def get_optimized_ffmpeg_options():
             '-reconnect 1 '
             '-reconnect_streamed 1 '
             '-reconnect_delay_max 5 '
-            '-analyzeduration 2147483647 '
-            '-probesize 2147483647'
+            '-analyzeduration 500000 '  # 분석 시간 더 단축
+            '-probesize 500000'  # 프로브 크기 더 단축
         ),
-        'options': '-vn -ar 48000 -ac 2 -f opus -b:a 96k'  # 오디오 설정 구체화
+        'options': '-vn -ar 48000 -ac 2 -f opus -b:a 96k -bufsize 96k'  # 버퍼 크기 추가
     }
 
 def get_optimized_ytdl_options():
@@ -86,15 +94,8 @@ def get_optimized_ytdl_options():
         }]
     }
 
-ffmpeg_options = {
-    'options': '-vn -c:a libopus -b:a 128k',  # 기본 오디오 옵션
-    'before_options': (
-        '-reconnect 1 '
-        '-reconnect_streamed 1 '
-        '-reconnect_delay_max 5 '
-        '-nostdin '  # 표준 입력 비활성화
-    )
-}
+# 기본 FFmpeg 옵션 (하위 호환성을 위해 유지)
+ffmpeg_options = get_optimized_ffmpeg_options()
 
 # 봇 설정
 BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')  # 환경 변수에서 토큰 가져오기

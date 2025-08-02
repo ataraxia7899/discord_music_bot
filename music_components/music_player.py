@@ -37,33 +37,30 @@ class YTDLSource:
     async def create_source(cls, query: str, *, loop=None, stream=True) -> Track:
         """URL 또는 검색어로부터 음원 소스를 생성"""
         loop = loop or asyncio.get_event_loop()
+        
+        # 캐시 확인
+        cache_key = query.lower().strip()
+        if cache_key in cls._cache:
+            cached_track = cls._cache[cache_key]
+            logger.info(f"캐시에서 트랙 로드: {cached_track.title}")
+            return cached_track
+        
         try:
             # 검색어 처리
             if not query.startswith(('http://', 'https://')):
                 query = f"ytsearch:{query}"
 
-            # 음원 정보 추출
-            data = await loop.run_in_executor(None, 
-                lambda: cls._ytdl.extract_info(query, download=False))
+            # 타임아웃과 함께 음원 정보 추출
+            data = await asyncio.wait_for(
+                loop.run_in_executor(None, 
+                    lambda: cls._ytdl.extract_info(query, download=False)),
+                timeout=30.0  # 30초 타임아웃
+            )
 
             if 'entries' in data:
                 data = data['entries'][0]
 
-            # FFmpeg 옵션 설정
-            ffmpeg_options = {
-                'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-                'options': '-vn'
-            }
-
-            # 음원 소스 생성
-            source = await discord.FFmpegOpusAudio.from_probe(
-                data['url'],
-                **ffmpeg_options
-            )
-
-            ytdl_source = cls(source, data=data)
-            
-            # Track 객체 생성
+            # Track 객체 생성 (source 없이)
             track = Track(
                 title=data.get('title', 'Unknown'),
                 url=data.get('url', ''),
@@ -73,11 +70,21 @@ class YTDLSource:
                 author=data.get('uploader', None)
             )
             
-            track.source = source  # 소스 직접 할당
-            logger.info(f"트랙 생성 완료: {track.title}")
+            # 캐시에 저장 (source 없이)
+            cls._cache[cache_key] = track
             
+            # 캐시 크기 제한 (메모리 누수 방지)
+            if len(cls._cache) > 100:
+                # 가장 오래된 항목 제거
+                oldest_key = next(iter(cls._cache))
+                del cls._cache[oldest_key]
+            
+            logger.info(f"트랙 생성 완료: {track.title}")
             return track
 
+        except asyncio.TimeoutError:
+            logger.error(f"음원 검색 타임아웃: {query}")
+            raise AudioPlayerError("음원 검색이 시간 초과되었습니다. 다시 시도해주세요.")
         except Exception as e:
             logger.error(f"음원 생성 중 오류: {e}")
             raise AudioPlayerError(f"음원 처리 실패: {str(e)}")
@@ -104,17 +111,38 @@ class MusicPlayer:
 
             # 음성 채널 연결
             if not voice_client:
-                voice_client = await voice_channel.connect(timeout=180, reconnect=True)
+                try:
+                    voice_client = await voice_channel.connect(timeout=60, reconnect=True)
+                    logger.info(f"음성 채널 연결 완료: {voice_channel.name}")
+                except Exception as e:
+                    logger.error(f"음성 채널 연결 실패: {e}")
+                    await ctx.send("음성 채널 연결에 실패했습니다. 다시 시도해주세요.")
+                    return
             elif voice_client.channel != voice_channel:
-                await voice_client.move_to(voice_channel)
+                try:
+                    await voice_client.move_to(voice_channel)
+                    logger.info(f"음성 채널 이동 완료: {voice_channel.name}")
+                except Exception as e:
+                    logger.error(f"음성 채널 이동 실패: {e}")
+                    await ctx.send("음성 채널 이동에 실패했습니다.")
+                    return
+
+            # 음성 클라이언트 상태 확인
+            if not voice_client.is_connected():
+                logger.error("음성 클라이언트가 연결되지 않음")
+                await ctx.send("음성 채널에 연결할 수 없습니다.")
+                return
 
             await ctx.send("🔍 검색 중...")  # 상태 메시지 추가
 
             # 음원 소스 생성
             try:
+                logger.info(f"음원 검색 시작: {query}")
                 track = await YTDLSource.create_source(query, loop=self.bot.loop)
                 await ctx.send(f"✅ 찾음: **{track.title}**")
+                logger.info(f"음원 검색 완료: {track.title}")
             except Exception as e:
+                logger.error(f"음원 검색 실패: {e}")
                 await ctx.send(f"음원을 불러오는 중 오류가 발생했습니다: {str(e)}")
                 return
 
@@ -126,10 +154,53 @@ class MusicPlayer:
 
             # 트랙 추가 및 재생
             if not voice_client.is_playing():
-                guild_state.current_track = track
-                await self.music_manager.play_next_song(voice_client, guild_id)
-                await ctx.send(f"🎵 재생 시작: **{track.title}**")
+                # 현재 재생 중이 아니므로 바로 재생
+                # 트랙을 대기열에 추가하고 play_next_song으로 재생
+                await guild_state.add_track(track)
+                logger.info(f"트랙을 대기열에 추가: {track.title}")
+                
+                # play_next_song 함수 호출
+                try:
+                    await self.music_manager.play_next_song(voice_client, guild_id)
+                    logger.info(f"play_next_song 함수 호출 완료: {track.title}")
+                except Exception as e:
+                    logger.error(f"play_next_song 함수 호출 실패: {e}")
+                    await ctx.send(f"재생 시작에 실패했습니다: {str(e)}")
+                    return
+                
+                # 재생 상태 확인
+                await asyncio.sleep(3)  # 대기 시간 증가
+                if voice_client.is_playing():
+                    await ctx.send(f"🎵 재생 시작: **{track.title}**")
+                    logger.info(f"재생 성공 확인: {track.title}")
+                else:
+                    # 재생이 실패한 경우 직접 재생 시도
+                    logger.warning(f"play_next_song으로 재생 실패, 직접 재생 시도: {track.title}")
+                    try:
+                        # 직접 음원 소스 생성 및 재생
+                        source = await discord.FFmpegOpusAudio.from_probe(
+                            track.url,
+                            method='fallback',
+                            **get_optimized_ffmpeg_options()
+                        )
+                        
+                        def after_playing(error):
+                            if error:
+                                logger.error(f"직접 재생 중 오류: {error}")
+                            else:
+                                logger.info(f"직접 재생 완료: {track.title}")
+                        
+                        voice_client.play(source, after=after_playing)
+                        await ctx.send(f"🎵 재생 시작 (직접 재생): **{track.title}**")
+                        logger.info(f"직접 재생 시작: {track.title}")
+                    except Exception as e:
+                        logger.error(f"직접 재생도 실패: {e}")
+                        await ctx.send(f"⚠️ 재생 시작에 실패했습니다: **{track.title}**")
+                        logger.error(f"재생 실패: {track.title}")
+                        # 실패 원인 추적
+                        logger.error(f"음성 클라이언트 상태: 연결={voice_client.is_connected()}, 재생={voice_client.is_playing()}")
             else:
+                # 현재 재생 중이므로 대기열에 추가
                 position = await self.queue_manager.add_track(guild_id, track)
                 await ctx.send(f"🎵 대기열 {position}번에 추가됨: **{track.title}**")
 
@@ -253,6 +324,12 @@ class MusicPlayer:
             elif voice_client.channel != voice_channel:
                 await voice_client.move_to(voice_channel)
 
+            # 음성 클라이언트 상태 확인
+            if not voice_client.is_connected():
+                logger.error("음성 클라이언트가 연결되지 않음")
+                await interaction.followup.send("음성 채널에 연결할 수 없습니다.")
+                return
+
             # 음원 소스 생성
             try:
                 track = await YTDLSource.create_source(query, loop=self.bot.loop)
@@ -265,10 +342,53 @@ class MusicPlayer:
 
             # 트랙 추가 및 재생
             if not voice_client.is_playing():
-                guild_state.current_track = track
-                await self.music_manager.play_next_song(voice_client, guild_id)
-                await interaction.followup.send(f"🎵 재생 시작: **{track.title}**")
+                # 현재 재생 중이 아니므로 바로 재생
+                # 트랙을 대기열에 추가하고 play_next_song으로 재생
+                await guild_state.add_track(track)
+                logger.info(f"트랙을 대기열에 추가: {track.title}")
+                
+                # play_next_song 함수 호출
+                try:
+                    await self.music_manager.play_next_song(voice_client, guild_id)
+                    logger.info(f"play_next_song 함수 호출 완료: {track.title}")
+                except Exception as e:
+                    logger.error(f"play_next_song 함수 호출 실패: {e}")
+                    await interaction.followup.send(f"재생 시작에 실패했습니다: {str(e)}")
+                    return
+                
+                # 재생 상태 확인
+                await asyncio.sleep(3)  # 대기 시간 증가
+                if voice_client.is_playing():
+                    await interaction.followup.send(f"🎵 재생 시작: **{track.title}**")
+                    logger.info(f"재생 성공 확인: {track.title}")
+                else:
+                    # 재생이 실패한 경우 직접 재생 시도
+                    logger.warning(f"play_next_song으로 재생 실패, 직접 재생 시도: {track.title}")
+                    try:
+                        # 직접 음원 소스 생성 및 재생
+                        source = await discord.FFmpegOpusAudio.from_probe(
+                            track.url,
+                            method='fallback',
+                            **get_optimized_ffmpeg_options()
+                        )
+                        
+                        def after_playing(error):
+                            if error:
+                                logger.error(f"직접 재생 중 오류: {error}")
+                            else:
+                                logger.info(f"직접 재생 완료: {track.title}")
+                        
+                        voice_client.play(source, after=after_playing)
+                        await interaction.followup.send(f"🎵 재생 시작 (직접 재생): **{track.title}**")
+                        logger.info(f"직접 재생 시작: {track.title}")
+                    except Exception as e:
+                        logger.error(f"직접 재생도 실패: {e}")
+                        await interaction.followup.send(f"⚠️ 재생 시작에 실패했습니다: **{track.title}**")
+                        logger.error(f"재생 실패: {track.title}")
+                        # 실패 원인 추적
+                        logger.error(f"음성 클라이언트 상태: 연결={voice_client.is_connected()}, 재생={voice_client.is_playing()}")
             else:
+                # 현재 재생 중이므로 대기열에 추가
                 position = await self.queue_manager.add_track(guild_id, track)
                 await interaction.followup.send(f"🎵 대기열 {position}번에 추가됨: **{track.title}**")
 

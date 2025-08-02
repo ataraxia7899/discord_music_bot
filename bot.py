@@ -35,6 +35,7 @@ class MusicBot(commands.Bot):
         
         # 음성 채널 상태 체크를 위한 이벤트 리스너 추가
         self.add_listener(self.on_voice_state_update)
+        self.add_listener(self.on_voice_state_update_bot)
         
     async def on_voice_state_update(self, member, before, after):
         """음성 채널 상태가 변경될 때 호출되는 이벤트 핸들러"""
@@ -65,6 +66,15 @@ class MusicBot(commands.Bot):
                     await text_channel.send("👋 음성 채널에 아무도 없어서 나갔습니다.")
                     state = self.music_manager.get_server_state(guild_id)
                     await state.clear_queue()
+
+    async def on_voice_state_update_bot(self, member, before, after):
+        """봇의 음성 상태 변경을 모니터링"""
+        if member.id == self.user.id:
+            logger.info(f"봇 음성 상태 변경: {before.channel} -> {after.channel}")
+            if after.channel is None:
+                logger.info("봇이 음성 채널에서 나감")
+            else:
+                logger.info(f"봇이 음성 채널에 입장: {after.channel.name}")
 
 def main():
     """봇을 실행하는 메인 함수"""
