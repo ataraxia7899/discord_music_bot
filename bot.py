@@ -39,8 +39,8 @@ class MusicBot(commands.Bot):
                     logger.error(f"Failed to load extension {filename}: {e}")
         
         # 음성 채널 상태 체크를 위한 이벤트 리스너 추가
-        self.add_listener(self.on_voice_state_update)
-        self.add_listener(self.on_voice_state_update_bot)
+        # on_voice_state_update는 async def로 정의되어 자동으로 등록됨
+        self.add_listener(self.on_voice_state_update_bot, 'on_voice_state_update')
         
     async def on_voice_state_update(self, member, before, after):
         """음성 채널 상태가 변경될 때 호출되는 이벤트 핸들러"""
