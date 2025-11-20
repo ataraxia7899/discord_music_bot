@@ -13,7 +13,12 @@ logger = logging.getLogger(__name__)
 class MusicBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
-        super().__init__(command_prefix=settings.default_prefix, intents=intents)
+        super().__init__(command_prefix=settings.default_prefix, intents=intents, help_command=None)
+
+    async def on_message(self, message):
+        """메시지 이벤트를 처리하지 않음으로써 접두사 명령어 비활성화"""
+        pass
+
         
     async def setup_hook(self):
         """봇 시작시 초기 설정을 담당"""

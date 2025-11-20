@@ -14,81 +14,30 @@ from concurrent.futures import ThreadPoolExecutor
 from .music_core import get_music_manager, Track
 
 logger = logging.getLogger(__name__)
+"""
+대기열 관리와 관련된 기능을 담당하는 모듈
+대기열 추가, 삭제, 이동 등의 기능을 제공합니다.
+"""
+
+import discord
+from discord.ext import commands
+import asyncio
+import random
+import logging
+from typing import Optional, List
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+from .music_core import get_music_manager, Track
+
+logger = logging.getLogger(__name__)
 
 class QueueCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.queue_manager = QueueManager(bot)
 
-    @commands.command(name="대기열")
-    async def show_queue(self, ctx):
-        """현재 대기열을 보여주는 명령어"""
-        try:
-            guild_id = ctx.guild.id
-            queue_info = await self.queue_manager.get_queue_info(guild_id)
-            
-            if not queue_info['current'] and not queue_info['queue']:
-                await ctx.send("🎵 대기열이 비어있습니다.")
-                return
-
-            embed = discord.Embed(title="🎵 현재 대기열", color=discord.Color.blue())
-            
-            # 현재 재생 중인 곡 정보
-            if queue_info['current']:
-                current = queue_info['current']
-                embed.add_field(
-                    name="현재 재생 중",
-                    value=f"🎵 **{current.title}**\n⏱️ 길이: {current.duration//60}:{current.duration%60:02d}",
-                    inline=False
-                )
-
-            # 대기열 목록
-            if queue_info['queue']:
-                queue_text = ""
-                for i, track in enumerate(queue_info['queue'], 1):
-                    queue_text += f"{i}. {track.title} ({track.duration//60}:{track.duration%60:02d})\n"
-                    if i >= 10:  # 최대 10곡까지만 표시
-                        remaining = len(queue_info['queue']) - 10
-                        if remaining > 0:
-                            queue_text += f"\n...그 외 {remaining}곡"
-                        break
-                embed.add_field(name="대기열", value=queue_text, inline=False)
-            
-            await ctx.send(embed=embed)
-
-        except Exception as e:
-            logger.error(f"대기열 표시 중 오류 발생: {e}")
-            await ctx.send(f"대기열 정보를 가져오는 중 오류가 발생했습니다: {str(e)}")
-
-    @commands.command(name="대기열초기화")
-    async def clear_queue_command(self, ctx):
-        """대기열을 초기화하는 명령어"""
-        try:
-            guild_id = ctx.guild.id
-            await self.queue_manager.clear_queue(guild_id)
-            await ctx.send("🗑️ 대기열이 초기화되었습니다.")
-        except Exception as e:
-            logger.error(f"대기열 초기화 중 오류 발생: {e}")
-            await ctx.send(f"대기열 초기화 중 오류가 발생했습니다: {str(e)}")
-
-    @commands.command(name="이동")
-    async def move_track_command(self, ctx, from_pos: int, to_pos: int):
-        """대기열에서 곡의 위치를 이동하는 명령어"""
-        try:
-            from_pos -= 1  # 사용자 입력은 1부터 시작하므로 0-based로 변환
-            to_pos -= 1
-            
-            guild_id = ctx.guild.id
-            if await self.queue_manager.move_track(guild_id, from_pos, to_pos):
-                await ctx.send(f"✅ {from_pos + 1}번 곡을 {to_pos + 1}번 위치로 이동했습니다.")
-            else:
-                await ctx.send("❌ 올바르지 않은 위치입니다.")
-        except Exception as e:
-            logger.error(f"곡 이동 중 오류 발생: {e}")
-            await ctx.send(f"곡 이동 중 오류가 발생했습니다: {str(e)}")
-
     # 슬래시 커맨드
-    async def show_queue_slash(self, interaction: discord.Interaction):
+    async def show_queue(self, interaction: discord.Interaction):
         """슬래시 명령어 버전의 대기열 보기"""
         try:
             guild_id = interaction.guild_id
@@ -128,7 +77,7 @@ class QueueCommands(commands.Cog):
                 ephemeral=True
             )
 
-    async def clear_queue_slash(self, interaction: discord.Interaction):
+    async def clear_queue(self, interaction: discord.Interaction):
         """슬래시 명령어 버전의 대기열 초기화"""
         try:
             guild_id = interaction.guild_id
@@ -141,7 +90,7 @@ class QueueCommands(commands.Cog):
                 ephemeral=True
             )
 
-    async def move_track_slash(self, interaction: discord.Interaction, from_pos: int, to_pos: int):
+    async def move_track(self, interaction: discord.Interaction, from_pos: int, to_pos: int):
         """슬래시 명령어 버전의 곡 이동"""
         try:
             from_pos -= 1
@@ -269,19 +218,14 @@ async def setup(bot):
     """봇에 대기열 관련 명령어들을 등록"""
     queue_commands = QueueCommands(bot)
     
-    # 일반 명령어 등록
-    bot.add_command(queue_commands.show_queue)
-    bot.add_command(queue_commands.clear_queue_command)
-    bot.add_command(queue_commands.move_track_command)
-    
     # 슬래시 명령어 등록
     @bot.tree.command(name="대기열", description="현재 재생 대기열을 보여줍니다.")
     async def show_queue_slash_command(interaction: discord.Interaction):
-        await queue_commands.show_queue_slash(interaction)
+        await queue_commands.show_queue(interaction)
     
     @bot.tree.command(name="대기열초기화", description="재생 대기열을 초기화합니다.")
     async def clear_queue_slash_command(interaction: discord.Interaction):
-        await queue_commands.clear_queue_slash(interaction)
+        await queue_commands.clear_queue(interaction)
     
     @bot.tree.command(name="이동", description="대기열에서 곡의 위치를 이동합니다.")
     async def move_track_slash_command(
@@ -289,6 +233,6 @@ async def setup(bot):
         시작위치: int,
         도착위치: int
     ):
-        await queue_commands.move_track_slash(interaction, 시작위치, 도착위치)
+        await queue_commands.move_track(interaction, 시작위치, 도착위치)
 
     print("Queue manager commands are ready!")
