@@ -59,11 +59,12 @@ class YTDLSource:
         
         try:
             # 검색어 처리
-            if not query.startswith(('http://', 'https://')):
-                query = f"ytsearch:{query}"
+            is_search = not query.startswith(('http://', 'https://'))
+            if is_search:
+                query = f"ytsearch1:{query}"
 
             # 플레이리스트인지 확인
-            is_playlist = 'list=' in query
+            is_playlist = 'list=' in query and not is_search
             
             # 옵션 설정 (플레이리스트인 경우 extract_flat 사용)
             ytdl_opts = settings.ytdl_options.copy()
@@ -76,26 +77,31 @@ class YTDLSource:
                     lambda: ydl.extract_info(query, download=False))
 
             if 'entries' in data:
-                # 플레이리스트인 경우
                 entries = list(data['entries'])
                 if not entries:
-                    raise AudioPlayerError("플레이리스트가 비어있습니다.")
+                    raise AudioPlayerError("결과를 찾을 수 없습니다.")
+
+                if not is_search:
+                    # 플레이리스트인 경우
+                    
+                    # 첫 번째 곡은 바로 재생을 위해 상세 정보 가져오기
+                    first_entry = entries[0]
+                    first_url = first_entry.get('url')
+                    if not first_url:
+                        first_url = f"https://www.youtube.com/watch?v={first_entry['id']}"
+                    
+                    # 첫 번째 곡 상세 정보 추출
+                    with YoutubeDL(settings.ytdl_options) as ydl:
+                        first_data = await loop.run_in_executor(None, 
+                            lambda: ydl.extract_info(first_url, download=False))
+                    
+                    first_track = cls._create_track(first_data)
+                    
+                    # 나머지는 백그라운드 처리를 위해 반환
+                    return first_track, entries[1:]
                 
-                # 첫 번째 곡은 바로 재생을 위해 상세 정보 가져오기
-                first_entry = entries[0]
-                first_url = first_entry.get('url')
-                if not first_url:
-                    first_url = f"https://www.youtube.com/watch?v={first_entry['id']}"
-                
-                # 첫 번째 곡 상세 정보 추출
-                with YoutubeDL(settings.ytdl_options) as ydl:
-                    first_data = await loop.run_in_executor(None, 
-                        lambda: ydl.extract_info(first_url, download=False))
-                
-                first_track = cls._create_track(first_data)
-                
-                # 나머지는 백그라운드 처리를 위해 반환
-                return first_track, entries[1:]
+                # 검색 결과인 경우 첫 번째 항목 사용
+                data = entries[0]
 
             # 단일 곡인 경우
             track = cls._create_track(data)
