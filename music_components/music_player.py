@@ -34,101 +34,19 @@ class YTDLSource:
         self.duration = data.get('duration', 0)
 
     @classmethod
-    async def create_source(cls, query: str, *, loop=None, stream=True) -> Track:
-        """URL 또는 검색어로부터 음원 소스를 생성"""
-        loop = loop or asyncio.get_event_loop()
-        
-        # 캐시 확인
-        cache_key = query.lower().strip()
-        if cache_key in cls._cache:
-            cached_track = cls._cache[cache_key]
-            logger.info(f"캐시에서 트랙 로드: {cached_track.title}")
-            return cached_track
-        
-        try:
-            # 검색어 처리
-            if not query.startswith(('http://', 'https://')):
-                query = f"ytsearch:{query}"
-
-            # 타임아웃과 함께 음원 정보 추출
-            data = await asyncio.wait_for(
-                loop.run_in_executor(None, 
-                    lambda: cls._ytdl.extract_info(query, download=False)),
-                timeout=30.0  # 30초 타임아웃
-            )
-
-            if 'entries' in data:
-                data = data['entries'][0]
-
-            # Track 객체 생성 (source 없이)
-            track = Track(
-                title=data.get('title', 'Unknown'),
-                url=data.get('url', ''),
-                duration=int(data.get('duration', 0)),
-                webpage_url=data.get('webpage_url', ''),
-                thumbnail_url=data.get('thumbnail', None),
-                author=data.get('uploader', None)
-            )
-            
-            # 캐시에 저장 (source 없이)
-            cls._cache[cache_key] = track
-            
-            # 캐시 크기 제한 (메모리 누수 방지)
-            if len(cls._cache) > 100:
-                # 가장 오래된 항목 제거
-                oldest_key = next(iter(cls._cache))
-                del cls._cache[oldest_key]
-            
-            logger.info(f"트랙 생성 완료: {track.title}")
-            return track
-
-        except asyncio.TimeoutError:
-            logger.error(f"음원 검색 타임아웃: {query}")
-            raise AudioPlayerError("음원 검색이 시간 초과되었습니다. 다시 시도해주세요.")
-        except Exception as e:
-            logger.error(f"음원 생성 중 오류: {e}")
-            raise AudioPlayerError(f"음원 처리 실패: {str(e)}")
-
-class MusicPlayer:
-    """음악 재생과 관련된 모든 명령어를 관리하는 클래스"""
-    
-"""
-음악 재생과 관련된 기능을 담당하는 모듈입니다.
-YouTube 다운로드와 오디오 처리를 담당합니다.
-"""
-
-import discord
-from discord.ext import commands
-from yt_dlp import YoutubeDL
-import asyncio
-import logging
-from typing import Optional, Dict, Any
-from datetime import datetime
-from config import settings, Track
-from .music_core import get_music_manager
-from .queue_manager import get_queue_manager
-
-logger = logging.getLogger(__name__)
-
-class AudioPlayerError(Exception):
-    """오디오 플레이어 관련 예외"""
-    pass
-
-class YTDLSource:
-    """YouTube 다운로더와 음원 처리를 담당하는 클래스"""
-    _cache: Dict[str, Any] = {}
-    _ytdl = YoutubeDL(settings.ytdl_options)
-
-    def __init__(self, source, *, data):
-        self.source = source
-        self.data = data
-        self.title = data.get('title')
-        self.url = data.get('url')
-        self.webpage_url = data.get('webpage_url', '')
-        self.duration = data.get('duration', 0)
+    def _create_track(cls, data: dict) -> Track:
+        """데이터 딕셔너리에서 Track 객체 생성"""
+        return Track(
+            title=data.get('title', 'Unknown'),
+            url=data.get('url', ''),
+            duration=int(data.get('duration', 0)),
+            webpage_url=data.get('webpage_url', ''),
+            thumbnail_url=data.get('thumbnail', None),
+            author=data.get('uploader', None)
+        )
 
     @classmethod
-    async def create_source(cls, query: str, *, loop=None, stream=True) -> Track:
+    async def create_source(cls, query: str, *, loop=None, stream=True):
         """URL 또는 검색어로부터 음원 소스를 생성"""
         loop = loop or asyncio.get_event_loop()
         
@@ -144,25 +62,43 @@ class YTDLSource:
             if not query.startswith(('http://', 'https://')):
                 query = f"ytsearch:{query}"
 
+            # 플레이리스트인지 확인
+            is_playlist = 'list=' in query
+            
+            # 옵션 설정 (플레이리스트인 경우 extract_flat 사용)
+            ytdl_opts = settings.ytdl_options.copy()
+            if is_playlist:
+                ytdl_opts['extract_flat'] = 'in_playlist'
+
             # 타임아웃과 함께 음원 정보 추출
-            data = await asyncio.wait_for(
-                loop.run_in_executor(None, 
-                    lambda: cls._ytdl.extract_info(query, download=False)),
-                timeout=30.0  # 30초 타임아웃
-            )
+            with YoutubeDL(ytdl_opts) as ydl:
+                data = await loop.run_in_executor(None, 
+                    lambda: ydl.extract_info(query, download=False))
 
             if 'entries' in data:
-                data = data['entries'][0]
+                # 플레이리스트인 경우
+                entries = list(data['entries'])
+                if not entries:
+                    raise AudioPlayerError("플레이리스트가 비어있습니다.")
+                
+                # 첫 번째 곡은 바로 재생을 위해 상세 정보 가져오기
+                first_entry = entries[0]
+                first_url = first_entry.get('url')
+                if not first_url:
+                    first_url = f"https://www.youtube.com/watch?v={first_entry['id']}"
+                
+                # 첫 번째 곡 상세 정보 추출
+                with YoutubeDL(settings.ytdl_options) as ydl:
+                    first_data = await loop.run_in_executor(None, 
+                        lambda: ydl.extract_info(first_url, download=False))
+                
+                first_track = cls._create_track(first_data)
+                
+                # 나머지는 백그라운드 처리를 위해 반환
+                return first_track, entries[1:]
 
-            # Track 객체 생성 (source 없이)
-            track = Track(
-                title=data.get('title', 'Unknown'),
-                url=data.get('url', ''),
-                duration=int(data.get('duration', 0)),
-                webpage_url=data.get('webpage_url', ''),
-                thumbnail_url=data.get('thumbnail', None),
-                author=data.get('uploader', None)
-            )
+            # 단일 곡인 경우
+            track = cls._create_track(data)
             
             # 캐시에 저장 (source 없이)
             cls._cache[cache_key] = track
@@ -220,7 +156,7 @@ class MusicPlayer:
 
             # 음원 소스 생성
             try:
-                track = await YTDLSource.create_source(query, loop=self.bot.loop)
+                result = await YTDLSource.create_source(query, loop=self.bot.loop)
             except Exception as e:
                 await interaction.followup.send(f"음원을 불러오는 중 오류가 발생했습니다: {str(e)}")
                 return
@@ -228,14 +164,20 @@ class MusicPlayer:
             guild_id = interaction.guild_id
             guild_state = self.music_manager.get_server_state(guild_id)
 
-            # 트랙 추가 및 재생
+            # 결과가 튜플이면 플레이리스트
+            if isinstance(result, tuple):
+                track, remaining_entries = result
+                is_playlist = True
+            else:
+                track = result
+                is_playlist = False
+
+            # 첫 번째 트랙 추가 및 재생
             if not voice_client.is_playing():
                 # 현재 재생 중이 아니므로 바로 재생
-                # 트랙을 대기열에 추가하고 play_next_song으로 재생
                 await guild_state.add_track(track)
                 logger.info(f"트랙을 대기열에 추가: {track.title}")
                 
-                # play_next_song 함수 호출
                 try:
                     await self.music_manager.play_next_song(voice_client, guild_id)
                     logger.info(f"play_next_song 함수 호출 완료: {track.title}")
@@ -245,44 +187,80 @@ class MusicPlayer:
                     return
                 
                 # 재생 상태 확인
-                await asyncio.sleep(3)  # 대기 시간 증가
+                await asyncio.sleep(3)
                 if voice_client.is_playing():
-                    await interaction.followup.send(f"🎵 재생 시작: **{track.title}**")
-                    logger.info(f"재생 성공 확인: {track.title}")
+                    msg = f"🎵 재생 시작: **{track.title}**"
+                    if is_playlist:
+                        msg += f"\n📜 플레이리스트의 나머지 {len(remaining_entries)}곡을 백그라운드에서 추가합니다..."
+                    await interaction.followup.send(msg)
                 else:
-                    # 재생이 실패한 경우 직접 재생 시도
-                    logger.warning(f"play_next_song으로 재생 실패, 직접 재생 시도: {track.title}")
-                    try:
-                        # 직접 음원 소스 생성 및 재생
-                        source = await discord.FFmpegOpusAudio.from_probe(
-                            track.url,
-                            method='fallback',
-                            **settings.ffmpeg_options
-                        )
-                        
-                        def after_playing(error):
-                            if error:
-                                logger.error(f"직접 재생 중 오류: {error}")
-                            else:
-                                logger.info(f"직접 재생 완료: {track.title}")
-                        
-                        voice_client.play(source, after=after_playing)
-                        await interaction.followup.send(f"🎵 재생 시작 (직접 재생): **{track.title}**")
-                        logger.info(f"직접 재생 시작: {track.title}")
-                    except Exception as e:
-                        logger.error(f"직접 재생도 실패: {e}")
-                        await interaction.followup.send(f"⚠️ 재생 시작에 실패했습니다: **{track.title}**")
-                        logger.error(f"재생 실패: {track.title}")
-                        # 실패 원인 추적
-                        logger.error(f"음성 클라이언트 상태: 연결={voice_client.is_connected()}, 재생={voice_client.is_playing()}")
+                    await interaction.followup.send(f"⚠️ 재생 시작에 실패했습니다: **{track.title}**")
             else:
                 # 현재 재생 중이므로 대기열에 추가
                 position = await self.queue_manager.add_track(guild_id, track)
-                await interaction.followup.send(f"🎵 대기열 {position}번에 추가됨: **{track.title}**")
+                msg = f"🎵 대기열 {position}번에 추가됨: **{track.title}**"
+                if is_playlist:
+                    msg += f"\n📜 플레이리스트의 나머지 {len(remaining_entries)}곡을 백그라운드에서 추가합니다..."
+                await interaction.followup.send(msg)
+
+            # 플레이리스트 나머지 곡 백그라운드 처리
+            if is_playlist:
+                self.bot.loop.create_task(
+                    self._process_playlist(interaction, guild_id, remaining_entries)
+                )
 
         except Exception as e:
             logger.error(f"재생 명령어 처리 중 오류 발생: {e}")
-            await interaction.followup.send(f"재생 중 오류가 발생했습니다: {str(e)}")
+            try:
+                await interaction.followup.send(f"재생 중 오류가 발생했습니다: {str(e)}")
+            except:
+                pass
+
+    async def _process_playlist(self, interaction: discord.Interaction, guild_id: int, entries: list):
+        """백그라운드에서 플레이리스트의 나머지 곡들을 처리"""
+        added_count = 0
+        failed_count = 0
+        
+        for entry in entries:
+            try:
+                # URL 추출
+                url = entry.get('url')
+                if not url:
+                    continue
+                    
+                if not url.startswith('http'):
+                    url = f"https://www.youtube.com/watch?v={url}"
+
+                # 개별 곡 정보 추출 (빠른 처리를 위해 필요 정보만)
+                with YoutubeDL(settings.ytdl_options) as ydl:
+                    data = await self.bot.loop.run_in_executor(None, 
+                        lambda: ydl.extract_info(url, download=False))
+                
+                if not data:
+                    failed_count += 1
+                    continue
+
+                track = YTDLSource._create_track(data)
+                await self.queue_manager.add_track(guild_id, track)
+                added_count += 1
+                
+                # 서버 부하 방지를 위한 약간의 딜레이
+                await asyncio.sleep(0.1)
+                
+            except Exception as e:
+                logger.error(f"플레이리스트 곡 추가 실패: {e}")
+                failed_count += 1
+                continue
+        
+        # 처리 완료 메시지
+        msg = f"✅ 플레이리스트 추가 완료: {added_count}곡 추가됨"
+        if failed_count > 0:
+            msg += f" ({failed_count}곡 실패/건너뜀)"
+        
+        try:
+            await interaction.followup.send(msg, ephemeral=True)
+        except:
+            pass
 
     async def skip(self, interaction: discord.Interaction):
         """슬래시 명령어 버전의 다음곡 명령어"""

@@ -53,6 +53,7 @@ class Settings:
             'quiet': True,
             'no_warnings': True,
             'default_search': 'ytsearch',
+            # 'noplaylist': True,  # 플레이리스트 지원을 위해 주석 처리
             # 'extract_flat': True, # 스트리밍 URL을 얻기 위해 비활성화
             'skip_download': True,
             'force_generic_extractor': False,
@@ -76,10 +77,10 @@ class Settings:
                 '-reconnect 1 '
                 '-reconnect_streamed 1 '
                 '-reconnect_delay_max 5 '
-                '-analyzeduration 500000 '
-                '-probesize 500000'
+                '-analyzeduration 0 '  # 분석 시간 최소화
+                '-probesize 32'        # 프로브 크기 최소화
             ),
-            'options': '-vn -ar 48000 -ac 2 -f opus -b:a 96k -bufsize 96k'
+            'options': '-vn -ar 48000 -ac 2 -f opus -b:a 96k -bufsize 2048k'  # 버퍼 크기 최적화
         }
 
 # 전역 설정 인스턴스
