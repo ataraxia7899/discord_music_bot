@@ -53,7 +53,7 @@ class Settings:
             'quiet': True,
             'no_warnings': True,
             'default_search': 'ytsearch',
-            'extract_flat': True,
+            # 'extract_flat': True, # 스트리밍 URL을 얻기 위해 비활성화
             'skip_download': True,
             'force_generic_extractor': False,
             'cachedir': './.cache',
