@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 import os
-from config import BOT_TOKEN, DEFAULT_PREFIX
+from config import settings
 import asyncio
 import logging
 from music_components import get_music_manager, get_queue_manager, MusicPlayer
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class MusicBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
-        super().__init__(command_prefix=DEFAULT_PREFIX, intents=intents)
+        super().__init__(command_prefix=settings.default_prefix, intents=intents)
         
     async def setup_hook(self):
         """봇 시작시 초기 설정을 담당"""
@@ -89,7 +89,7 @@ def main():
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}")
     
-    bot.run(BOT_TOKEN)
+    bot.run(settings.bot_token)
 
 if __name__ == "__main__":
     main()

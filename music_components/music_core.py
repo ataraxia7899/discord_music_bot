@@ -9,7 +9,8 @@ from datetime import datetime
 import asyncio
 import logging
 import discord
-from config import Track, get_optimized_ffmpeg_options
+import discord
+from config import Track, settings
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ class MusicManager:
                         source = await discord.FFmpegOpusAudio.from_probe(
                             next_track.url,
                             method='fallback',
-                            **get_optimized_ffmpeg_options()
+                            **settings.ffmpeg_options
                         )
                         next_track.source = source  # 소스 저장
                         logger.info(f"음원 소스 생성 완료: {next_track.title}")

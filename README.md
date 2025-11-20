@@ -12,11 +12,11 @@ YouTube에서 음악을 검색하고 스트리밍하며, 음성 채널에서 고
 discord_music_bot/
 ├── music_components/          # 음악 관련 컴포넌트
 │   ├── __init__.py
-│   ├── music_core.py         # 음악 재생 핵심 기능
-│   ├── music_player.py       # 음악 재생 관리자
-│   └── queue_manager.py      # 대기열 관리
-├── bot.py                    # 봇의 메인 코드
-├── config.py                 # 설정 및 환경 변수 관리
+│   ├── music_core.py         # 음악 재생 상태 및 핵심 로직 (ServerMusicState)
+│   ├── music_player.py       # 명령어 처리 및 재생 제어 (MusicPlayer)
+│   └── queue_manager.py      # 대기열 관리 및 조작 (QueueManager)
+├── bot.py                    # 봇 실행 및 초기화
+├── config.py                 # 통합 설정 관리 (Settings Singleton)
 └── requirements.txt          # 의존성 패키지 목록
 ```
 
@@ -93,7 +93,7 @@ pip install -r requirements.txt
 
 3. 환경 변수 설정
 ```bash
-# .env 파일 생성
+# .env 파일 생성 (필수)
 DISCORD_BOT_TOKEN=your_token_here
 BOT_PREFIX=!  # 선택사항, 기본값 !
 ```

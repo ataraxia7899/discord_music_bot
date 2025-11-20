@@ -10,7 +10,7 @@ import asyncio
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
-from config import get_ytdl_options, get_optimized_ffmpeg_options, Track
+from config import settings, Track
 from .music_core import get_music_manager
 from .queue_manager import get_queue_manager
 
@@ -23,7 +23,7 @@ class AudioPlayerError(Exception):
 class YTDLSource:
     """YouTube 다운로더와 음원 처리를 담당하는 클래스"""
     _cache: Dict[str, Any] = {}
-    _ytdl = YoutubeDL(get_ytdl_options())
+    _ytdl = YoutubeDL(settings.ytdl_options)
 
     def __init__(self, source, *, data):
         self.source = source
@@ -181,7 +181,7 @@ class MusicPlayer:
                         source = await discord.FFmpegOpusAudio.from_probe(
                             track.url,
                             method='fallback',
-                            **get_optimized_ffmpeg_options()
+                            **settings.ffmpeg_options
                         )
                         
                         def after_playing(error):
@@ -369,7 +369,7 @@ class MusicPlayer:
                         source = await discord.FFmpegOpusAudio.from_probe(
                             track.url,
                             method='fallback',
-                            **get_optimized_ffmpeg_options()
+                            **settings.ffmpeg_options
                         )
                         
                         def after_playing(error):
