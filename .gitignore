@@ -1,2 +1,4 @@
-/secret.py
 .env
+__pycache__/
+*.py[cod]
+*$py.class
